@@ -568,18 +568,37 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const getSourceLabel = (source) => (source === 'cdc' ? 'CDC' : 'WHO')
 
   const calculateAgeDomain = (patientAge) => {
+    let minAge = 0
+    let maxAge = 0
+    
     if (patientAge <= 0 || patientAge < 0.25) {
+      // Very young: show from 0 to 0.5 years
       return [0, 0.5]
+    } else if (patientAge < 1) {
+      // Under 1 year: still show from 0, but limit range
+      maxAge = Math.min(patientAge * 2, 1.5)
+      return [0, maxAge]
     } else if (patientAge < 2.5) {
-      const doubleAge = patientAge * 2
-      const rounded = Math.ceil(doubleAge * 2) / 2
-      return [0, rounded]
+      // 1-2.5 years: show from 50% of age to 2x age
+      minAge = Math.max(0, patientAge * 0.5)
+      maxAge = patientAge * 2
+      const roundedMax = Math.ceil(maxAge * 2) / 2
+      return [minAge, roundedMax]
     } else if (patientAge < 5) {
-      return [0, Math.min(patientAge * 1.5, 8)]
+      // 2.5-5 years: show from 60% of age to 1.5x age
+      minAge = Math.max(0, patientAge * 0.6)
+      maxAge = Math.min(patientAge * 1.5, 8)
+      return [minAge, maxAge]
     } else if (patientAge < 10) {
-      return [0, Math.min(patientAge * 1.3, 15)]
+      // 5-10 years: show from 70% of age to 1.3x age
+      minAge = Math.max(0, patientAge * 0.7)
+      maxAge = Math.min(patientAge * 1.3, 15)
+      return [minAge, maxAge]
     } else {
-      return [0, Math.min(patientAge * 1.2, 20)]
+      // 10+ years: show from 75% of age to 1.2x age
+      minAge = Math.max(0, patientAge * 0.75)
+      maxAge = Math.min(patientAge * 1.2, 20)
+      return [minAge, maxAge]
     }
   }
 
@@ -587,7 +606,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   
   const filterDataByAge = (data) => {
     if (!data) return []
-    return data.filter(item => item.ageYears != null && item.ageYears <= ageDomain[1])
+    return data.filter(item => 
+      item.ageYears != null && 
+      item.ageYears >= ageDomain[0] && 
+      item.ageYears <= ageDomain[1]
+    )
   }
 
   const roundToNiceNumber = (value, roundDown = false) => {
