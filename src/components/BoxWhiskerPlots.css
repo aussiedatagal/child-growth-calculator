@@ -1,0 +1,81 @@
+.box-whisker-plots {
+  width: 100%;
+  margin-top: 2rem;
+}
+
+.box-whisker-plots h2 {
+  color: #333;
+  margin-bottom: 1rem;
+  font-size: 1.8rem;
+  border-bottom: 2px solid #667eea;
+  padding-bottom: 0.5rem;
+}
+
+.plot-description {
+  color: #666;
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.box-plots-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .box-plots-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.box-plot-item {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1.5rem;
+  border: 1px solid #e0e0e0;
+}
+
+.box-plot-item h3 {
+  color: #555;
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.chart-source {
+  font-size: 0.85rem;
+  font-weight: normal;
+  color: #888;
+  font-style: italic;
+}
+
+.box-plot-content {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.box-plot-visual {
+  flex: 1;
+  background: white;
+  border-radius: 4px;
+  padding: 1rem;
+  border: 1px solid #e0e0e0;
+  min-width: 300px;
+}
+
+@media (max-width: 767px) {
+  .box-plot-content {
+    flex-direction: column;
+  }
+
+  .box-plot-item {
+    padding: 1rem;
+  }
+
+  .box-plot-visual {
+    min-width: 100%;
+  }
+}
+
