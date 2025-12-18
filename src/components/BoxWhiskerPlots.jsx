@@ -1,0 +1,565 @@
+import { useState, useEffect } from 'react'
+import Papa from 'papaparse'
+import './BoxWhiskerPlots.css'
+
+const AGE_SOURCES = [
+  { value: 'who', label: 'WHO' },
+  { value: 'cdc', label: 'CDC' },
+]
+
+const genderToKey = (gender) => (gender === 'male' ? 'boys' : 'girls')
+
+const parseCsv = (csvText) =>
+  Papa.parse(csvText, {
+    header: true,
+    dynamicTyping: true,
+    skipEmptyLines: true,
+  }).data
+
+const toAgeYears = (month) => (typeof month === 'number' ? month / 12 : null)
+
+const interp = (x, x0, x1, y0, y1) => {
+  if ([x, x0, x1, y0, y1].some(v => typeof v !== 'number' || Number.isNaN(v))) return null
+  if (x1 === x0) return y0
+  return y0 + ((x - x0) * (y1 - y0)) / (x1 - x0)
+}
+
+const normalizeP3P15P50P85P97 = (row) => {
+  const p3 = row.P3
+  const p50 = row.P50
+  const p97 = row.P97
+
+  const p15 =
+    row.P15 ??
+    interp(15, 10, 25, row.P10, row.P25)
+
+  const p85 =
+    row.P85 ??
+    interp(85, 75, 90, row.P75, row.P90)
+
+  return { p3, p15, p50, p85, p97 }
+}
+
+function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange }) {
+  const [wfaData, setWfaData] = useState(null)
+  const [hfaData, setHfaData] = useState(null)
+  const [hcfaData, setHcfaData] = useState(null)
+  const [acfaData, setAcfaData] = useState(null)
+  const [ssfaData, setSsfaData] = useState(null)
+  const [tsfaData, setTsfaData] = useState(null)
+  const [bmifaData, setBmifaData] = useState(null)
+  const [weightHeightData, setWeightHeightData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  
+  useEffect(() => {
+    if (patientData.gender && patientData.measurement) {
+      loadReferenceData()
+    } else {
+      setLoading(false)
+    }
+  }, [patientData.gender, patientData.measurement, referenceSources?.age])
+
+  const loadReferenceData = async () => {
+    setLoading(true)
+    try {
+      const gKey = genderToKey(patientData.gender)
+      const ageSource = referenceSources?.age || 'who'
+      const baseUrl = import.meta.env.BASE_URL
+
+      const wfaPath = `${baseUrl}wfa_${gKey}_${ageSource}.csv`
+      const hcfaPath = `${baseUrl}hcfa_${gKey}_${ageSource}.csv`
+      const heightPaths =
+        ageSource === 'who'
+          ? [`${baseUrl}lhfa_${gKey}_who.csv`]
+          : [`${baseUrl}lhfa_${gKey}_cdc.csv`, `${baseUrl}hfa_${gKey}_cdc.csv`]
+
+      const wflPath = `${baseUrl}wfl_${gKey}_${ageSource}.csv`
+      const wfhPath = `${baseUrl}wfh_${gKey}_${ageSource}.csv`
+      const bmifaPath = `${baseUrl}bmifa_${gKey}_who.csv` // BMI-for-age only available from WHO
+      const acfaPath = `${baseUrl}acfa_${gKey}_who.csv`   // arm circumference-for-age (WHO only)
+      const ssfaPath = `${baseUrl}ssfa_${gKey}_who.csv`   // subscapular skinfold-for-age (WHO only)
+      const tsfaPath = `${baseUrl}tsfa_${gKey}_who.csv`   // triceps skinfold-for-age (WHO only)
+
+      const fetchAll = await Promise.all([
+        fetch(wfaPath),
+        fetch(hcfaPath),
+        ...heightPaths.map(p => fetch(p)),
+        fetch(wflPath),
+        fetch(wfhPath),
+        fetch(bmifaPath),
+        fetch(acfaPath),
+        fetch(ssfaPath),
+        fetch(tsfaPath),
+      ])
+
+      const texts = await Promise.all(fetchAll.map(r => r.text()))
+      const [wfaText, hcfaText, ...rest] = texts
+      const n = rest.length
+      const wflText = rest[n - 6]
+      const wfhText = rest[n - 5]
+      const bmifaText = rest[n - 4]
+      const acfaText = rest[n - 3]
+      const ssfaText = rest[n - 2]
+      const tsfaText = rest[n - 1]
+      const heightTexts = rest.slice(0, n - 6)
+
+      const wfaRows = parseCsv(wfaText)
+      const hcfaRows = parseCsv(hcfaText)
+
+      const wfaProcessed = wfaRows
+        .map(r => {
+          const ageYears = toAgeYears(r.Month)
+          if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
+          const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+          return { ageYears, weightP3: p3, weightP15: p15, weightP50: p50, weightP85: p85, weightP97: p97 }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.ageYears - b.ageYears)
+
+      const hcfaProcessed = hcfaRows
+        .map(r => {
+          const ageYears = toAgeYears(r.Month)
+          if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
+          const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+          return { ageYears, hcP3: p3, hcP15: p15, hcP50: p50, hcP85: p85, hcP97: p97 }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.ageYears - b.ageYears)
+
+      const heightRowsList = heightTexts.map(parseCsv)
+      const heightCombinedRows =
+        ageSource === 'who'
+          ? heightRowsList[0]
+          : (() => {
+              const [lenInf = [], stat = []] = heightRowsList
+              const byMonth = new Map()
+              for (const r of lenInf) {
+                if (typeof r.Month === 'number') byMonth.set(r.Month, { ...r })
+              }
+              for (const r of stat) {
+                if (typeof r.Month === 'number' && r.Month >= 24) byMonth.set(r.Month, { ...r })
+              }
+              return Array.from(byMonth.values()).sort((a, b) => a.Month - b.Month)
+            })()
+
+      const hfaProcessed = heightCombinedRows
+        .map(r => {
+          const ageYears = toAgeYears(r.Month)
+          if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
+          const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+          return { ageYears, heightP3: p3, heightP15: p15, heightP50: p50, heightP85: p85, heightP97: p97 }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.ageYears - b.ageYears)
+
+      const wflRows = parseCsv(wflText)
+      const wfhRows = parseCsv(wfhText)
+
+      const normalizeWHRow = (r, axis) => {
+        const height = axis === 'Length' ? r.Length : r.Height
+        if (typeof height !== 'number' || Number.isNaN(height)) return null
+        const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+        return { height, p3, p15, p50, p85, p97, source: axis.toLowerCase() }
+      }
+
+      const wflProcessed = wflRows.map(r => normalizeWHRow(r, 'Length')).filter(Boolean)
+      const wfhProcessed = wfhRows.map(r => normalizeWHRow(r, 'Height')).filter(Boolean)
+
+      const whCombined = [
+        ...wflProcessed.filter(d => d.height < 85),
+        ...wfhProcessed.filter(d => d.height >= 85),
+      ].sort((a, b) => a.height - b.height)
+
+      const bmifaRows = parseCsv(bmifaText)
+      const bmifaProcessed = bmifaRows
+        .map(r => {
+          const ageYears = toAgeYears(r.Month)
+          if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
+          const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+          return { ageYears, bmiP3: p3, bmiP15: p15, bmiP50: p50, bmiP85: p85, bmiP97: p97 }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.ageYears - b.ageYears)
+
+      const acfaRows = parseCsv(acfaText)
+      const acfaProcessed = acfaRows
+        .map(r => {
+          const ageYears = toAgeYears(r.Month)
+          if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
+          const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+          return { ageYears, acfaP3: p3, acfaP15: p15, acfaP50: p50, acfaP85: p85, acfaP97: p97 }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.ageYears - b.ageYears)
+
+      const ssfaRows = parseCsv(ssfaText)
+      const ssfaProcessed = ssfaRows
+        .map(r => {
+          const ageYears = toAgeYears(r.Month)
+          if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
+          const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+          return { ageYears, ssfaP3: p3, ssfaP15: p15, ssfaP50: p50, ssfaP85: p85, ssfaP97: p97 }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.ageYears - b.ageYears)
+
+      const tsfaRows = parseCsv(tsfaText)
+      const tsfaProcessed = tsfaRows
+        .map(r => {
+          const ageYears = toAgeYears(r.Month)
+          if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
+          const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
+          return { ageYears, tsfaP3: p3, tsfaP15: p15, tsfaP50: p50, tsfaP85: p85, tsfaP97: p97 }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.ageYears - b.ageYears)
+
+      setWfaData(wfaProcessed)
+      setHcfaData(hcfaProcessed)
+      setHfaData(hfaProcessed)
+      setAcfaData(acfaProcessed)
+      setSsfaData(ssfaProcessed)
+      setTsfaData(tsfaProcessed)
+      setBmifaData(bmifaProcessed)
+      setWeightHeightData(whCombined)
+      setLoading(false)
+    } catch (error) {
+      console.error('Error loading reference data:', error)
+      setLoading(false)
+    }
+  }
+
+  const calculateBMI = (weight, height) => {
+    if (!weight || !height || height <= 0) return null
+    const heightM = height / 100
+    return weight / (heightM * heightM)
+  }
+
+  const calculateExactPercentile = (value, p3, p15, p50, p85, p97) => {
+    if (value <= p3) {
+      const ratio = value / p3
+      return 1 + (ratio * 2) 
+    }
+    if (value <= p15) {
+      const ratio = (value - p3) / (p15 - p3)
+      return 3 + (ratio * 12)
+    }
+    if (value <= p50) {
+      const ratio = (value - p15) / (p50 - p15)
+      return 15 + (ratio * 35)
+    }
+    if (value <= p85) {
+      const ratio = (value - p50) / (p85 - p50)
+      return 50 + (ratio * 35)
+    }
+    if (value <= p97) {
+      const ratio = (value - p85) / (p97 - p85)
+      return 85 + (ratio * 12)
+    }
+    return 98
+  }
+
+  const getWeightHeightReference = () => {
+    if (!weightHeightData || !patientData.measurement || !patientData.measurement.height) return null
+    
+    const patientHeight = patientData.measurement.height
+    const closest = weightHeightData.reduce((closest, item) => {
+      if (!closest) return item
+      const closestDiff = Math.abs(closest.height - patientHeight)
+      const currentDiff = Math.abs(item.height - patientHeight)
+      return currentDiff < closestDiff ? item : closest
+    }, null)
+    
+    return closest
+  }
+
+  const whReference = getWeightHeightReference()
+
+  if (loading) {
+    return <div className="loading">Loading reference data...</div>
+  }
+
+  if (!patientData.measurement || !patientData.gender) {
+    return null
+  }
+
+  const measurement = patientData.measurement
+
+  const getSourceLabel = (source) => (source === 'cdc' ? 'CDC' : 'WHO')
+
+  const getClosestRefByAge = (data) => {
+    if (!data || !measurement) return null
+    const patientAge = measurement.ageYears
+    return data.reduce((closest, item) => {
+      if (!closest) return item
+      const closestDiff = Math.abs(closest.ageYears - patientAge)
+      const currentDiff = Math.abs(item.ageYears - patientAge)
+      return currentDiff < closestDiff ? item : closest
+    }, null)
+  }
+
+  const weightRef = getClosestRefByAge(wfaData)
+  const heightRef = getClosestRefByAge(hfaData)
+  const hcRef = getClosestRefByAge(hcfaData)
+  const bmiRef = getClosestRefByAge(bmifaData)
+  const acfaRef = getClosestRefByAge(acfaData)
+  const ssfaRef = getClosestRefByAge(ssfaData)
+  const tsfaRef = getClosestRefByAge(tsfaData)
+  const patientBMI = calculateBMI(measurement.weight, measurement.height)
+
+  const createBoxPlotData = (p3, p15, p50, p85, p97, patientValue, unit, label, source) => {
+    if (!patientValue) return null
+
+    return {
+      label,
+      unit,
+      min: p3,
+      q1: p15,
+      median: p50,
+      q3: p85,
+      max: p97,
+      patient: patientValue,
+      source: source || ''
+    }
+  }
+
+  const heightData = (measurement.height && heightRef)
+    ? createBoxPlotData(
+        heightRef.heightP3,
+        heightRef.heightP15,
+        heightRef.heightP50,
+        heightRef.heightP85,
+        heightRef.heightP97,
+        measurement.height,
+        'cm',
+        'Height for Age',
+        getSourceLabel(referenceSources?.age)
+      )
+    : null
+
+  const weightData = (measurement.weight && weightRef)
+    ? createBoxPlotData(
+        weightRef.weightP3,
+        weightRef.weightP15,
+        weightRef.weightP50,
+        weightRef.weightP85,
+        weightRef.weightP97,
+        measurement.weight,
+        'kg',
+        'Weight for Age',
+        getSourceLabel(referenceSources?.age)
+      )
+    : null
+
+  const whData = (measurement.height && measurement.weight && whReference)
+    ? createBoxPlotData(
+        whReference.p3,
+        whReference.p15,
+        whReference.p50,
+        whReference.p85,
+        whReference.p97,
+        measurement.weight,
+        'kg',
+        'Weight for Height',
+        getSourceLabel(referenceSources?.wfh)
+      )
+    : null
+
+  const hcData = (measurement.headCircumference && hcRef && hcRef.hcP50 != null)
+    ? createBoxPlotData(
+        hcRef.hcP3,
+        hcRef.hcP15,
+        hcRef.hcP50,
+        hcRef.hcP85,
+        hcRef.hcP97,
+        measurement.headCircumference,
+        'cm',
+        'Head Circumference for Age',
+        getSourceLabel(referenceSources?.age)
+      )
+    : null
+
+  const bmiData = (referenceSources?.age === 'who' && patientBMI != null && bmiRef && bmiRef.bmiP50 != null)
+    ? createBoxPlotData(
+        bmiRef.bmiP3,
+        bmiRef.bmiP15,
+        bmiRef.bmiP50,
+        bmiRef.bmiP85,
+        bmiRef.bmiP97,
+        patientBMI,
+        'kg/m²',
+        'BMI for Age',
+        'WHO'
+      )
+    : null
+
+  const acfaBoxData = (referenceSources?.age === 'who' && measurement.armCircumference && acfaRef && acfaRef.acfaP50 != null)
+    ? createBoxPlotData(
+        acfaRef.acfaP3,
+        acfaRef.acfaP15,
+        acfaRef.acfaP50,
+        acfaRef.acfaP85,
+        acfaRef.acfaP97,
+        measurement.armCircumference,
+        'cm',
+        'Mid-Upper Arm Circumference for Age',
+        'WHO'
+      )
+    : null
+
+  const ssfaBoxData = (referenceSources?.age === 'who' && measurement.subscapularSkinfold && ssfaRef && ssfaRef.ssfaP50 != null)
+    ? createBoxPlotData(
+        ssfaRef.ssfaP3,
+        ssfaRef.ssfaP15,
+        ssfaRef.ssfaP50,
+        ssfaRef.ssfaP85,
+        ssfaRef.ssfaP97,
+        measurement.subscapularSkinfold,
+        'mm',
+        'Subscapular Skinfold for Age',
+        'WHO'
+      )
+    : null
+
+  const tsfaBoxData = (referenceSources?.age === 'who' && measurement.tricepsSkinfold && tsfaRef && tsfaRef.tsfaP50 != null)
+    ? createBoxPlotData(
+        tsfaRef.tsfaP3,
+        tsfaRef.tsfaP15,
+        tsfaRef.tsfaP50,
+        tsfaRef.tsfaP85,
+        tsfaRef.tsfaP97,
+        measurement.tricepsSkinfold,
+        'mm',
+        'Triceps Skinfold for Age',
+        'WHO'
+      )
+    : null
+
+  const renderBoxPlot = (data) => {
+    if (!data) return null
+
+    const range = data.max - data.min
+    const padding = Math.max(range * 0.1, 0.5) 
+    const yMax = data.max + padding
+    const yMin = Math.max(0, data.min - padding)
+    const totalRange = yMax - yMin
+    const scale = totalRange > 0 ? 180 / totalRange : 1
+
+    const yPos = (value) => 10 + ((yMax - value) * scale)
+    const boxTop = yPos(data.q3)
+    const boxBottom = yPos(data.q1)
+    const boxHeight = boxBottom - boxTop
+    const medianY = yPos(data.median)
+    const patientY = yPos(data.patient)
+
+    const exactPercentile = calculateExactPercentile(
+      data.patient,
+      data.min, 
+      data.q1,  
+      data.median, 
+      data.q3,  
+      data.max  
+    )
+    
+    let patientPercentile = ''
+    if (exactPercentile < 3) {
+      patientPercentile = `< ${exactPercentile.toFixed(1)}th`
+    } else if (exactPercentile >= 97) {
+      patientPercentile = `> ${exactPercentile.toFixed(1)}th`
+    } else {
+      patientPercentile = `${exactPercentile.toFixed(1)}th`
+    }
+
+    return (
+      <div key={data.label} className="box-plot-item">
+        <h3>{data.label} ({data.unit}) {data.source && <span className="chart-source">({data.source})</span>}</h3>
+        <div className="box-plot-content">
+          <div className="box-plot-visual">
+            <svg width="100%" height="200" viewBox="0 0 380 200" preserveAspectRatio="none">
+              <line x1="40" y1="10" x2="40" y2="190" stroke="#333" strokeWidth="2" />
+              <line x1="40" y1="190" x2="340" y2="190" stroke="#333" strokeWidth="2" />
+              
+              <text x="35" y="15" textAnchor="end" fontSize="11" fill="#666">{yMax.toFixed(1)}</text>
+              <text x="35" y="100" textAnchor="end" fontSize="11" fill="#666">{((data.max + data.min) / 2).toFixed(1)}</text>
+              <text x="35" y="195" textAnchor="end" fontSize="11" fill="#666">{yMin.toFixed(1)}</text>
+              
+              <line x1="200" y1={yPos(data.max)} x2="200" y2={boxTop} stroke="#333" strokeWidth="2" />
+              <line x1="200" y1={boxBottom} x2="200" y2={yPos(data.min)} stroke="#333" strokeWidth="2" />
+              <line x1="190" y1={yPos(data.max)} x2="210" y2={yPos(data.max)} stroke="#333" strokeWidth="2" />
+              <line x1="190" y1={yPos(data.min)} x2="210" y2={yPos(data.min)} stroke="#333" strokeWidth="2" />
+              
+              <rect 
+                x="150" 
+                y={boxTop} 
+                width="100" 
+                height={boxHeight}
+                fill="#4ecdc4" 
+                fillOpacity="0.6"
+                stroke="#333" 
+                strokeWidth="2"
+              />
+              
+              <line 
+                x1="150" 
+                y1={medianY} 
+                x2="250" 
+                y2={medianY} 
+                stroke="#ff6b6b" 
+                strokeWidth="3"
+              />
+              
+              <circle 
+                cx="200" 
+                cy={patientY} 
+                r="8" 
+                fill="#000" 
+                stroke="#fff" 
+                strokeWidth="3"
+              />
+              <line
+                x1="200"
+                y1={patientY - 15}
+                x2="200"
+                y2={patientY + 15}
+                stroke="#000"
+                strokeWidth="3"
+              />
+              
+              <text x="260" y={yPos(data.max) + 4} fontSize="10" fill="#666">97th: {data.max.toFixed(1)}</text>
+              <text x="260" y={boxTop + 4} fontSize="10" fill="#666">85th: {data.q3.toFixed(1)}</text>
+              <text x="260" y={medianY + 4} fontSize="11" fill="#ff6b6b" fontWeight="bold">50th: {data.median.toFixed(1)}</text>
+              <text x="260" y={boxBottom + 4} fontSize="10" fill="#666">15th: {data.q1.toFixed(1)}</text>
+              <text x="260" y={yPos(data.min) + 4} fontSize="10" fill="#666">3rd: {data.min.toFixed(1)}</text>
+
+              <text x="140" y={patientY + 5} textAnchor="end" fontSize="12" fill="#000" fontWeight="bold">Patient: {data.patient.toFixed(1)} {data.unit}</text>
+              <text x="140" y={patientY + 20} textAnchor="end" fontSize="10" fill="#666">({patientPercentile} percentile)</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="box-whisker-plots">
+      <h2>Percentile Distribution</h2>
+      <p className="plot-description">
+        Box plots show reference percentiles (3rd, 15th, 50th, 85th, 97th). 
+        The black marker shows where your measurement falls on this distribution.
+      </p>
+      
+      <div className="box-plots-container">
+        {weightData && renderBoxPlot(weightData)}
+        {heightData && renderBoxPlot(heightData)}
+        {whData && renderBoxPlot(whData)}
+        {hcData && renderBoxPlot(hcData)}
+        {bmiData && renderBoxPlot(bmiData)}
+        {acfaBoxData && renderBoxPlot(acfaBoxData)}
+        {ssfaBoxData && renderBoxPlot(ssfaBoxData)}
+        {tsfaBoxData && renderBoxPlot(tsfaBoxData)}
+      </div>
+    </div>
+  )
+}
+
+export default BoxWhiskerPlots

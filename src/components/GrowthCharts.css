@@ -1,0 +1,168 @@
+.growth-charts {
+  width: 100%;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.growth-charts h2 {
+  color: #333;
+  margin-bottom: 1.5rem;
+  font-size: 1.8rem;
+  border-bottom: 2px solid #667eea;
+  padding-bottom: 0.5rem;
+}
+
+.chart-section {
+  margin-bottom: 3rem;
+}
+
+.section-header {
+  color: #333;
+  margin-bottom: 1rem;
+  margin-top: 2rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 0.5rem;
+}
+
+.chart-section:first-child .section-header {
+  margin-top: 0;
+}
+
+.chart-container {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.chart-scroll-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 10px;
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+  /* Custom scrollbar styling */
+  scrollbar-width: thin;
+  scrollbar-color: #667eea #f0f0f0;
+  /* Ensure it fits mobile screens */
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.chart-scroll-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.chart-scroll-wrapper::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 4px;
+}
+
+.chart-scroll-wrapper::-webkit-scrollbar-thumb {
+  background: #667eea;
+  border-radius: 4px;
+}
+
+.chart-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #5568d3;
+}
+
+.chart-container h3 {
+  color: #555;
+  margin-bottom: 1rem;
+  font-size: 1.3rem;
+}
+
+.chart-source {
+  font-size: 0.85rem;
+  font-weight: normal;
+  color: #888;
+  font-style: italic;
+}
+
+.loading,
+.no-data {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.data-source-selector {
+  background: #f0f4ff;
+  border: 1px solid #667eea;
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.source-group {
+  flex: 1;
+  min-width: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.source-group label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.source-group select {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.source-group select:hover {
+  border-color: #667eea;
+}
+
+.source-group select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+@media (max-width: 767px) {
+  .chart-container {
+    padding: 1rem;
+  }
+
+  .growth-charts h2 {
+    font-size: 1.5rem;
+  }
+
+  .chart-container h3 {
+    font-size: 1.1rem;
+  }
+
+  .section-header {
+    font-size: 1.3rem;
+  }
+
+  .data-source-selector {
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  .source-group {
+    min-width: 100%;
+  }
+}
+
