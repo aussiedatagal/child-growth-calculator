@@ -40,6 +40,48 @@ const normalizeP3P15P50P85P97 = (row) => {
   return { p3, p15, p50, p85, p97 }
 }
 
+// Calculate percentile using LMS method (more accurate than linear interpolation)
+const calculatePercentileFromLMS = (value, L, M, S) => {
+  if (typeof L !== 'number' || typeof M !== 'number' || typeof S !== 'number' || 
+      Number.isNaN(L) || Number.isNaN(M) || Number.isNaN(S) || M <= 0 || S <= 0) {
+    return null
+  }
+
+  let z
+  if (Math.abs(L) < 0.0001) {
+    // L ≈ 0: use log-normal transformation
+    z = Math.log(value / M) / S
+  } else {
+    // L ≠ 0: use Box-Cox transformation
+    z = ((Math.pow(value / M, L) - 1) / (L * S))
+  }
+
+  // Convert z-score to percentile using standard normal distribution
+  // Using approximation: percentile = 100 * Φ(z) where Φ is CDF of standard normal
+  const percentile = 100 * (0.5 * (1 + erf(z / Math.sqrt(2))))
+  
+  return percentile
+}
+
+// Error function approximation for standard normal CDF
+const erf = (x) => {
+  // Abramowitz and Stegun approximation
+  const a1 =  0.254829592
+  const a2 = -0.284496736
+  const a3 =  1.421413741
+  const a4 = -1.453152027
+  const a5 =  1.061405429
+  const p  =  0.3275911
+
+  const sign = x < 0 ? -1 : 1
+  x = Math.abs(x)
+
+  const t = 1.0 / (1.0 + p * x)
+  const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x)
+
+  return sign * y
+}
+
 function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange }) {
   const [wfaData, setWfaData] = useState(null)
   const [hfaData, setHfaData] = useState(null)
@@ -111,7 +153,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
           const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-          return { ageYears, weightP3: p3, weightP15: p15, weightP50: p50, weightP85: p85, weightP97: p97 }
+          return { ageYears, weightP3: p3, weightP15: p15, weightP25: r.P25, weightP50: p50, weightP75: r.P75, weightP85: p85, weightP97: p97, weightL: r.L, weightM: r.M, weightS: r.S }
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
@@ -121,7 +163,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
           const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-          return { ageYears, hcP3: p3, hcP15: p15, hcP50: p50, hcP85: p85, hcP97: p97 }
+          return { ageYears, hcP3: p3, hcP15: p15, hcP25: r.P25, hcP50: p50, hcP75: r.P75, hcP85: p85, hcP97: p97, hcL: r.L, hcM: r.M, hcS: r.S }
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
@@ -147,7 +189,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
           const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-          return { ageYears, heightP3: p3, heightP15: p15, heightP50: p50, heightP85: p85, heightP97: p97 }
+          return { ageYears, heightP3: p3, heightP15: p15, heightP25: r.P25, heightP50: p50, heightP75: r.P75, heightP85: p85, heightP97: p97, heightL: r.L, heightM: r.M, heightS: r.S }
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
@@ -159,7 +201,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         const height = axis === 'Length' ? r.Length : r.Height
         if (typeof height !== 'number' || Number.isNaN(height)) return null
         const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-        return { height, p3, p15, p50, p85, p97, source: axis.toLowerCase() }
+        return { height, p3, p15, p25: r.P25, p50, p75: r.P75, p85, p97, L: r.L, M: r.M, S: r.S, source: axis.toLowerCase() }
       }
 
       const wflProcessed = wflRows.map(r => normalizeWHRow(r, 'Length')).filter(Boolean)
@@ -176,7 +218,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
           const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-          return { ageYears, bmiP3: p3, bmiP15: p15, bmiP50: p50, bmiP85: p85, bmiP97: p97 }
+          return { ageYears, bmiP3: p3, bmiP15: p15, bmiP25: r.P25, bmiP50: p50, bmiP75: r.P75, bmiP85: p85, bmiP97: p97, bmiL: r.L, bmiM: r.M, bmiS: r.S }
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
@@ -187,7 +229,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
           const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-          return { ageYears, acfaP3: p3, acfaP15: p15, acfaP50: p50, acfaP85: p85, acfaP97: p97 }
+          return { ageYears, acfaP3: p3, acfaP15: p15, acfaP25: r.P25, acfaP50: p50, acfaP75: r.P75, acfaP85: p85, acfaP97: p97, acfaL: r.L, acfaM: r.M, acfaS: r.S }
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
@@ -198,7 +240,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
           const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-          return { ageYears, ssfaP3: p3, ssfaP15: p15, ssfaP50: p50, ssfaP85: p85, ssfaP97: p97 }
+          return { ageYears, ssfaP3: p3, ssfaP15: p15, ssfaP25: r.P25, ssfaP50: p50, ssfaP75: r.P75, ssfaP85: p85, ssfaP97: p97, ssfaL: r.L, ssfaM: r.M, ssfaS: r.S }
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
@@ -209,7 +251,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
           const { p3, p15, p50, p85, p97 } = normalizeP3P15P50P85P97(r)
-          return { ageYears, tsfaP3: p3, tsfaP15: p15, tsfaP50: p50, tsfaP85: p85, tsfaP97: p97 }
+          return { ageYears, tsfaP3: p3, tsfaP15: p15, tsfaP25: r.P25, tsfaP50: p50, tsfaP75: r.P75, tsfaP85: p85, tsfaP97: p97, tsfaL: r.L, tsfaM: r.M, tsfaS: r.S }
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
@@ -235,26 +277,41 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     return weight / (heightM * heightM)
   }
 
-  const calculateExactPercentile = (value, p3, p15, p50, p85, p97) => {
-    if (value <= p3) {
-      const ratio = value / p3
-      return 1 + (ratio * 2) 
+  const calculateExactPercentile = (value, p3, p25, p50, p75, p97, L, M, S) => {
+    // Try LMS method first (more accurate), fall back to linear interpolation
+    if (typeof L === 'number' && typeof M === 'number' && typeof S === 'number' &&
+        !Number.isNaN(L) && !Number.isNaN(M) && !Number.isNaN(S) && M > 0 && S > 0) {
+      const pct = calculatePercentileFromLMS(value, L, M, S)
+      if (pct !== null && !Number.isNaN(pct)) {
+        return Math.max(0, Math.min(100, pct))
+      }
     }
-    if (value <= p15) {
-      const ratio = (value - p3) / (p15 - p3)
-      return 3 + (ratio * 12)
+
+    // Fall back to linear interpolation using quartiles
+    if (value <= p3) {
+      // Use linear interpolation from 0 to p3, assuming 0 corresponds to ~0.1th percentile
+      if (p3 > 0) {
+        const ratio = value / p3
+        // Interpolate from 0.1th (at value=0) to 3rd (at value=p3)
+        return 0.1 + (ratio * 2.9)
+      }
+      return 0.1
+    }
+    if (value <= p25) {
+      const ratio = (value - p3) / (p25 - p3)
+      return 3 + (ratio * 22)  // 3rd to 25th percentile
     }
     if (value <= p50) {
-      const ratio = (value - p15) / (p50 - p15)
-      return 15 + (ratio * 35)
+      const ratio = (value - p25) / (p50 - p25)
+      return 25 + (ratio * 25)  // 25th to 50th percentile
     }
-    if (value <= p85) {
-      const ratio = (value - p50) / (p85 - p50)
-      return 50 + (ratio * 35)
+    if (value <= p75) {
+      const ratio = (value - p50) / (p75 - p50)
+      return 50 + (ratio * 25)  // 50th to 75th percentile
     }
     if (value <= p97) {
-      const ratio = (value - p85) / (p97 - p85)
-      return 85 + (ratio * 12)
+      const ratio = (value - p75) / (p97 - p75)
+      return 75 + (ratio * 22)  // 75th to 97th percentile
     }
     return 98
   }
@@ -307,131 +364,158 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   const tsfaRef = getClosestRefByAge(tsfaData)
   const patientBMI = calculateBMI(measurement.weight, measurement.height)
 
-  const createBoxPlotData = (p3, p15, p50, p85, p97, patientValue, unit, label, source) => {
+  const createBoxPlotData = (p3, p25, p50, p75, p97, patientValue, unit, label, source, L, M, S) => {
     if (!patientValue) return null
 
     return {
       label,
       unit,
       min: p3,
-      q1: p15,
+      q1: p25,
       median: p50,
-      q3: p85,
+      q3: p75,
       max: p97,
       patient: patientValue,
-      source: source || ''
+      source: source || '',
+      L: L,
+      M: M,
+      S: S
     }
   }
 
   const heightData = (measurement.height && heightRef)
     ? createBoxPlotData(
         heightRef.heightP3,
-        heightRef.heightP15,
+        heightRef.heightP25,
         heightRef.heightP50,
-        heightRef.heightP85,
+        heightRef.heightP75,
         heightRef.heightP97,
         measurement.height,
         'cm',
         'Height for Age',
-        getSourceLabel(referenceSources?.age)
+        getSourceLabel(referenceSources?.age),
+        heightRef.heightL,
+        heightRef.heightM,
+        heightRef.heightS
       )
     : null
 
   const weightData = (measurement.weight && weightRef)
     ? createBoxPlotData(
         weightRef.weightP3,
-        weightRef.weightP15,
+        weightRef.weightP25,
         weightRef.weightP50,
-        weightRef.weightP85,
+        weightRef.weightP75,
         weightRef.weightP97,
         measurement.weight,
         'kg',
         'Weight for Age',
-        getSourceLabel(referenceSources?.age)
+        getSourceLabel(referenceSources?.age),
+        weightRef.weightL,
+        weightRef.weightM,
+        weightRef.weightS
       )
     : null
 
   const whData = (measurement.height && measurement.weight && whReference)
     ? createBoxPlotData(
         whReference.p3,
-        whReference.p15,
+        whReference.p25,
         whReference.p50,
-        whReference.p85,
+        whReference.p75,
         whReference.p97,
         measurement.weight,
         'kg',
         'Weight for Height',
-        getSourceLabel(referenceSources?.wfh)
+        getSourceLabel(referenceSources?.wfh),
+        whReference.L,
+        whReference.M,
+        whReference.S
       )
     : null
 
   const hcData = (measurement.headCircumference && hcRef && hcRef.hcP50 != null)
     ? createBoxPlotData(
         hcRef.hcP3,
-        hcRef.hcP15,
+        hcRef.hcP25,
         hcRef.hcP50,
-        hcRef.hcP85,
+        hcRef.hcP75,
         hcRef.hcP97,
         measurement.headCircumference,
         'cm',
         'Head Circumference for Age',
-        getSourceLabel(referenceSources?.age)
+        getSourceLabel(referenceSources?.age),
+        hcRef.hcL,
+        hcRef.hcM,
+        hcRef.hcS
       )
     : null
 
   const bmiData = (referenceSources?.age === 'who' && patientBMI != null && bmiRef && bmiRef.bmiP50 != null)
     ? createBoxPlotData(
         bmiRef.bmiP3,
-        bmiRef.bmiP15,
+        bmiRef.bmiP25,
         bmiRef.bmiP50,
-        bmiRef.bmiP85,
+        bmiRef.bmiP75,
         bmiRef.bmiP97,
         patientBMI,
         'kg/m²',
         'BMI for Age',
-        'WHO'
+        'WHO',
+        bmiRef.bmiL,
+        bmiRef.bmiM,
+        bmiRef.bmiS
       )
     : null
 
   const acfaBoxData = (referenceSources?.age === 'who' && measurement.armCircumference && acfaRef && acfaRef.acfaP50 != null)
     ? createBoxPlotData(
         acfaRef.acfaP3,
-        acfaRef.acfaP15,
+        acfaRef.acfaP25,
         acfaRef.acfaP50,
-        acfaRef.acfaP85,
+        acfaRef.acfaP75,
         acfaRef.acfaP97,
         measurement.armCircumference,
         'cm',
         'Mid-Upper Arm Circumference for Age',
-        'WHO'
+        'WHO',
+        acfaRef.acfaL,
+        acfaRef.acfaM,
+        acfaRef.acfaS
       )
     : null
 
   const ssfaBoxData = (referenceSources?.age === 'who' && measurement.subscapularSkinfold && ssfaRef && ssfaRef.ssfaP50 != null)
     ? createBoxPlotData(
         ssfaRef.ssfaP3,
-        ssfaRef.ssfaP15,
+        ssfaRef.ssfaP25,
         ssfaRef.ssfaP50,
-        ssfaRef.ssfaP85,
+        ssfaRef.ssfaP75,
         ssfaRef.ssfaP97,
         measurement.subscapularSkinfold,
         'mm',
         'Subscapular Skinfold for Age',
-        'WHO'
+        'WHO',
+        ssfaRef.ssfaL,
+        ssfaRef.ssfaM,
+        ssfaRef.ssfaS
       )
     : null
 
   const tsfaBoxData = (referenceSources?.age === 'who' && measurement.tricepsSkinfold && tsfaRef && tsfaRef.tsfaP50 != null)
     ? createBoxPlotData(
         tsfaRef.tsfaP3,
-        tsfaRef.tsfaP15,
+        tsfaRef.tsfaP25,
         tsfaRef.tsfaP50,
-        tsfaRef.tsfaP85,
+        tsfaRef.tsfaP75,
         tsfaRef.tsfaP97,
         measurement.tricepsSkinfold,
         'mm',
         'Triceps Skinfold for Age',
-        'WHO'
+        'WHO',
+        tsfaRef.tsfaL,
+        tsfaRef.tsfaM,
+        tsfaRef.tsfaS
       )
     : null
 
@@ -458,7 +542,10 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       data.q1,  
       data.median, 
       data.q3,  
-      data.max  
+      data.max,
+      data.L,
+      data.M,
+      data.S
     )
     
     let patientPercentile = ''
@@ -526,9 +613,9 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
               />
               
               <text x="260" y={yPos(data.max) + 4} fontSize="10" fill="#666">97th: {data.max.toFixed(1)}</text>
-              <text x="260" y={boxTop + 4} fontSize="10" fill="#666">85th: {data.q3.toFixed(1)}</text>
+              <text x="260" y={boxTop + 4} fontSize="10" fill="#666">75th: {data.q3.toFixed(1)}</text>
               <text x="260" y={medianY + 4} fontSize="11" fill="#ff6b6b" fontWeight="bold">50th: {data.median.toFixed(1)}</text>
-              <text x="260" y={boxBottom + 4} fontSize="10" fill="#666">15th: {data.q1.toFixed(1)}</text>
+              <text x="260" y={boxBottom + 4} fontSize="10" fill="#666">25th: {data.q1.toFixed(1)}</text>
               <text x="260" y={yPos(data.min) + 4} fontSize="10" fill="#666">3rd: {data.min.toFixed(1)}</text>
 
               <text x="140" y={patientY + 5} textAnchor="end" fontSize="12" fill="#000" fontWeight="bold">Patient: {data.patient.toFixed(1)} {data.unit}</text>
