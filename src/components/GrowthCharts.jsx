@@ -590,6 +590,79 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return data.filter(item => item.ageYears != null && item.ageYears <= ageDomain[1])
   }
 
+  const roundToNiceNumber = (value, roundDown = false) => {
+    if (value === 0) return 0
+    if (value < 0) return -roundToNiceNumber(-value, !roundDown)
+    
+    // Determine the order of magnitude
+    const order = Math.floor(Math.log10(value))
+    const magnitude = Math.pow(10, order)
+    
+    // Choose a nice step size: 1, 2, 5, 10, 20, 50, 100, etc.
+    // Use a step that's smaller than the value for better granularity
+    let step
+    if (value < magnitude) {
+      // Value is between magnitude/10 and magnitude
+      step = magnitude / 10  // e.g., 0.1, 1, 10
+    } else if (value < 2 * magnitude) {
+      step = magnitude / 5    // e.g., 0.2, 2, 20
+    } else if (value < 5 * magnitude) {
+      step = magnitude / 2   // e.g., 0.5, 5, 50
+    } else {
+      step = magnitude       // e.g., 1, 10, 100
+    }
+    
+    // Ensure step is at least 0.1 for small values
+    if (step < 0.1) step = 0.1
+    
+    if (roundDown) {
+      return Math.floor(value / step) * step
+    } else {
+      return Math.ceil(value / step) * step
+    }
+  }
+
+  const calculateYDomain = (chartData, valueKeys, patientValue = null) => {
+    if (!chartData || chartData.length === 0) return ['auto', 'auto']
+    
+    let min = Infinity
+    let max = -Infinity
+    
+    // Find min/max from all percentile lines
+    chartData.forEach(item => {
+      valueKeys.forEach(key => {
+        const value = item[key]
+        if (typeof value === 'number' && !isNaN(value)) {
+          min = Math.min(min, value)
+          max = Math.max(max, value)
+        }
+      })
+    })
+    
+    // Include patient value if provided
+    if (patientValue != null && typeof patientValue === 'number' && !isNaN(patientValue)) {
+      min = Math.min(min, patientValue)
+      max = Math.max(max, patientValue)
+    }
+    
+    if (min === Infinity || max === -Infinity) return ['auto', 'auto']
+    
+    // Add padding: 5% below min, 5% above max
+    const range = max - min
+    const padding = range * 0.05
+    let domainMin = Math.max(0, min - padding) // Don't go below 0 for physical measurements
+    let domainMax = max + padding
+    
+    // Round to nice numbers
+    domainMin = roundToNiceNumber(domainMin, true)
+    domainMax = roundToNiceNumber(domainMax, false)
+    
+    // Ensure domainMin doesn't go below 0 for physical measurements
+    if (domainMin < 0) domainMin = 0
+    
+    return [domainMin, domainMax]
+  }
+
   const patientBMI = calculateBMI(patientData.measurement?.weight, patientData.measurement?.height)
   const wfaChartDataRaw = prepareChartData(wfaData, patientData.measurement?.weight, 'patientWeight')
   const hfaChartDataRaw = prepareChartData(hfaData, patientData.measurement?.height, 'patientHeight')
@@ -811,7 +884,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
               />
-              <YAxis label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} />
+              <YAxis 
+                domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP50', 'weightP85', 'weightP97', 'patientWeight'], patientData.measurement.weight)}
+                label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
+              />
               <Tooltip 
                 formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' kg', 'Patient'] : [value?.toFixed(1) + ' kg', name + ' percentile']}
                 labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
@@ -844,7 +920,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
               />
-              <YAxis label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} />
+              <YAxis 
+                domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP50', 'heightP85', 'heightP97', 'patientHeight'], patientData.measurement.height)}
+                label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} 
+              />
               <Tooltip 
                 formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' cm', 'Patient'] : [value?.toFixed(1) + ' cm', name + ' percentile']}
                 labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
@@ -877,7 +956,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
               />
-              <YAxis label={{ value: 'Head Circumference (cm)', angle: -90, position: 'insideLeft' }} />
+              <YAxis 
+                domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP50', 'hcP85', 'hcP97', 'patientHC'], patientData.measurement.headCircumference)}
+                label={{ value: 'Head Circumference (cm)', angle: -90, position: 'insideLeft' }} 
+              />
               <Tooltip 
                 formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' cm', 'Patient'] : [value?.toFixed(1) + ' cm', name + ' percentile']}
                 labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
@@ -910,7 +992,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
               />
-              <YAxis label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} />
+              <YAxis 
+                domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP50', 'bmiP85', 'bmiP97', 'patientBMI'], patientBMI)}
+                label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} 
+              />
               <Tooltip 
                 formatter={(value, name) => name === 'Patient' ? [value?.toFixed(2) + ' kg/m²', 'Patient'] : [value?.toFixed(2) + ' kg/m²', name + ' percentile']}
                 labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
@@ -952,7 +1037,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     tickFormatter={formatAgeTick}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
-                  <YAxis label={{ value: 'Arm Circumference (cm)', angle: -90, position: 'insideLeft' }} />
+                  <YAxis 
+                    domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP50', 'acfaP85', 'acfaP97', 'patientACFA'], patientData.measurement.armCircumference)}
+                    label={{ value: 'Arm Circumference (cm)', angle: -90, position: 'insideLeft' }} 
+                  />
                   <Tooltip
                     formatter={(value, name) =>
                       name === 'Patient'
@@ -989,7 +1077,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     tickFormatter={formatAgeTick}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
-                  <YAxis label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft' }} />
+                  <YAxis 
+                    domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP50', 'ssfaP85', 'ssfaP97', 'patientSSFA'], patientData.measurement.subscapularSkinfold)}
+                    label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
+                  />
                   <Tooltip
                     formatter={(value, name) =>
                       name === 'Patient'
@@ -1026,7 +1117,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     tickFormatter={formatAgeTick}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
-                  <YAxis label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft' }} />
+                  <YAxis 
+                    domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP50', 'tsfaP85', 'tsfaP97', 'patientTSFA'], patientData.measurement.tricepsSkinfold)}
+                    label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
+                  />
                   <Tooltip
                     formatter={(value, name) =>
                       name === 'Patient'
@@ -1067,7 +1161,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   domain={['dataMin', 'dataMax']}
                   label={{ value: 'Height (cm)', position: 'insideBottom', offset: -10 }}
                 />
-                <YAxis label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} />
+                <YAxis 
+                  domain={calculateYDomain(whChartData, ['p3', 'p15', 'p50', 'p85', 'p97', 'patientWeight'], patientData.measurement.weight)}
+                  label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
+                />
                 <Tooltip 
                   formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' kg', 'Patient'] : [value?.toFixed(1) + ' kg', name + ' percentile']}
                   labelFormatter={(label) => `Height: ${parseFloat(label).toFixed(1)} cm`}
