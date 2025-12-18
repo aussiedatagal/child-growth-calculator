@@ -815,42 +815,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const calculateYDomain = (chartData, valueKeys, patientValue = null) => {
     if (!chartData || chartData.length === 0) return ['auto', 'auto']
     
-    let min = Infinity
-    let max = -Infinity
-    
-    // Find min/max from all percentile lines
-    chartData.forEach(item => {
-      valueKeys.forEach(key => {
-        const value = item[key]
-        if (typeof value === 'number' && !isNaN(value)) {
-          min = Math.min(min, value)
-          max = Math.max(max, value)
-        }
-      })
-    })
-    
-    // Include patient value if provided
-    if (patientValue != null && typeof patientValue === 'number' && !isNaN(patientValue)) {
-      min = Math.min(min, patientValue)
-      max = Math.max(max, patientValue)
-    }
-    
-    if (min === Infinity || max === -Infinity) return ['auto', 'auto']
-    
-    // Add padding: 5% below min, 5% above max
-    const range = max - min
-    const padding = range * 0.05
-    let domainMin = Math.max(0, min - padding) // Don't go below 0 for physical measurements
-    let domainMax = max + padding
-    
-    // Round to nice numbers
-    domainMin = roundToNiceNumber(domainMin, true)
-    domainMax = roundToNiceNumber(domainMax, false)
-    
-    // Ensure domainMin doesn't go below 0 for physical measurements
-    if (domainMin < 0) domainMin = 0
-    
-    return [domainMin, domainMax]
+    // Try setting max to 0 - Recharts might detect it's too small and auto-adjust
+    return ['auto', 'auto']
   }
 
   const patientBMI = calculateBMI(patientData.measurement?.weight, patientData.measurement?.height)
