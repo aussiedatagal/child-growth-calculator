@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback, memo } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, ResponsiveContainer } from 'recharts'
 import Papa from 'papaparse'
 import './GrowthCharts.css'
@@ -92,7 +92,7 @@ const getNumericPercentileFromLabel = (label) => {
   return match ? parseFloat(match[1]) : -1
 }
 
-const OrderedLegend = ({ payload, percentiles = ['97th', '85th', '75th', '50th', '25th', '15th', '3rd'] }) => {
+const OrderedLegend = memo(({ payload, percentiles = ['97th', '85th', '75th', '50th', '25th', '15th', '3rd'] }) => {
   if (!payload || !Array.isArray(payload)) return null
   
   const allItems = []
@@ -156,10 +156,10 @@ const OrderedLegend = ({ payload, percentiles = ['97th', '85th', '75th', '50th',
       })}
     </ul>
   )
-}
+})
 
 // Custom Tooltip component that sorts items by percentile (highest first)
-const OrderedTooltip = ({ active, payload, label, labelFormatter, formatter }) => {
+const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter }) => {
   if (!active || !payload || !payload.length) return null
   
   // Sort payload by percentile value (descending - highest first)
@@ -216,7 +216,7 @@ const OrderedTooltip = ({ active, payload, label, labelFormatter, formatter }) =
       </ul>
     </div>
   )
-}
+})
 
 function formatAgeLabel(ageYears) {
   if (ageYears < 2) {
@@ -251,7 +251,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
   }, [patientData.gender, patientData.measurement, referenceSources?.age])
 
-  const loadReferenceData = async () => {
+      const loadReferenceData = async () => {
     setLoading(true)
     try {
       const gKey = genderToKey(patientData.gender)
@@ -509,7 +509,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
   }
 
-  const prepareChartData = (data, patientValue, valueKey) => {
+  const prepareChartData = useCallback((data, patientValue, valueKey) => {
     if (!data || !patientData.measurement) return []
     
     const measurement = patientData.measurement
@@ -534,9 +534,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     return chartData
-  }
+  }, [patientData.measurement])
 
-  const prepareWeightHeightData = () => {
+  const prepareWeightHeightData = useCallback(() => {
     if (!weightHeightData || !patientData.measurement || !patientData.measurement.height) return []
     
     const measurement = patientData.measurement
@@ -559,9 +559,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     return chartData
-  }
+  }, [weightHeightData, patientData.measurement])
 
-  const getClosestRefByAge = (data) => {
+  const getClosestRefByAge = useCallback((data) => {
     if (!data || !patientData.measurement) return null
     const patientAge = patientData.measurement.ageYears
     return data.reduce((closest, item) => {
@@ -570,15 +570,15 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       const currentDiff = Math.abs(item.ageYears - patientAge)
       return currentDiff < closestDiff ? item : closest
     }, null)
-  }
+  }, [patientData.measurement])
 
-  const calculateBMI = (weight, height) => {
+  const calculateBMI = useCallback((weight, height) => {
     if (!weight || !height || height <= 0) return null
     const heightM = height / 100
     return weight / (heightM * heightM)
-  }
+  }, [])
 
-  const getPatientPercentile = (value, type) => {
+  const getPatientPercentile = useCallback((value, type) => {
     if (!value || !patientData.measurement) return null
 
     const sourceData =
@@ -664,9 +664,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         closestRef.tsfaP3, closestRef.tsfaP15, closestRef.tsfaP50, closestRef.tsfaP85, closestRef.tsfaP97)
     }
     return null
-  }
+  }, [wfaData, hfaData, hcfaData, bmifaData, acfaData, ssfaData, tsfaData, getClosestRefByAge, patientData.measurement])
 
-  const getWeightForHeightPercentile = (weight, height) => {
+  const getWeightForHeightPercentile = useCallback((weight, height) => {
     if (!weight || !height || !weightHeightData) return null
     
     const closestRef = weightHeightData.reduce((closest, item) => {
@@ -709,19 +709,13 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       return `${pct.toFixed(1)}th`
     }
     return '> 97th'
-  }
+  }, [weightHeightData])
 
-  if (loading) return <div className="loading">Loading reference data...</div>
-  if (!patientData.gender) return <div className="no-data">Please select gender to view growth charts</div>
-  if (!patientData.measurement) return <div className="no-data">Please add a measurement to view growth charts</div>
-  if (!wfaData && !hfaData && !hcfaData) return <div className="no-data">No reference data available</div>
+  // All hooks must be called before any early returns
+  const getSourceLabel = useCallback((source) => (source === 'cdc' ? 'CDC' : 'WHO'), [])
 
-  const measurementAge = patientData.measurement.ageYears
-  const ageLabel = measurementAge < 2 ? 'Age (Months)' : 'Age (Years)'
-  
-  const getSourceLabel = (source) => (source === 'cdc' ? 'CDC' : 'WHO')
-
-  const calculateAgeDomain = (patientAge) => {
+  const calculateAgeDomain = useCallback((patientAge) => {
+    if (!patientAge) return [0, 1]
     let minAge = 0
     let maxAge = 0
     
@@ -754,90 +748,84 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       maxAge = Math.min(patientAge * 1.2, 20)
       return [minAge, maxAge]
     }
-  }
+  }, [])
 
-  const ageDomain = calculateAgeDomain(measurementAge)
+  const measurementAge = patientData.measurement?.ageYears || 0
+  const ageDomain = useMemo(() => calculateAgeDomain(measurementAge), [calculateAgeDomain, measurementAge])
   
-  const filterDataByAge = (data) => {
+  const filterDataByAge = useCallback((data) => {
     if (!data) return []
     return data.filter(item => 
       item.ageYears != null && 
       item.ageYears >= ageDomain[0] && 
       item.ageYears <= ageDomain[1]
     )
-  }
+  }, [ageDomain])
 
-  const roundToNiceNumber = (value, roundDown = false) => {
-    if (value === 0) return 0
-    if (value < 0) return -roundToNiceNumber(-value, !roundDown)
-    
-    // Determine the order of magnitude
-    const order = Math.floor(Math.log10(value))
-    const magnitude = Math.pow(10, order)
-    
-    // Choose a nice step size: 1, 2, 5, 10, 20, 50, 100, etc.
-    // Use a step that's smaller than the value for better granularity
-    let step
-    if (value < magnitude) {
-      // Value is between magnitude/10 and magnitude
-      step = magnitude / 10  // e.g., 0.1, 1, 10
-    } else if (value < 2 * magnitude) {
-      step = magnitude / 5    // e.g., 0.2, 2, 20
-    } else if (value < 5 * magnitude) {
-      step = magnitude / 2   // e.g., 0.5, 5, 50
-    } else {
-      step = magnitude       // e.g., 1, 10, 100
-    }
-    
-    // Ensure step is at least 0.1 for small values
-    if (step < 0.1) step = 0.1
-    
-    if (roundDown) {
-      return Math.floor(value / step) * step
-    } else {
-      return Math.ceil(value / step) * step
-    }
-  }
-
-  const calculateYDomain = (chartData, valueKeys, patientValue = null) => {
+  const calculateYDomain = useCallback((chartData, valueKeys, patientValue = null) => {
     if (!chartData || chartData.length === 0) return ['auto', 'auto']
     
     // Try setting max to 0 - Recharts might detect it's too small and auto-adjust
     return ['auto', 'auto']
-  }
+  }, [])
 
-  const patientBMI = calculateBMI(patientData.measurement?.weight, patientData.measurement?.height)
-  const wfaChartDataRaw = prepareChartData(wfaData, patientData.measurement?.weight, 'patientWeight')
-  const hfaChartDataRaw = prepareChartData(hfaData, patientData.measurement?.height, 'patientHeight')
-  const hcfaChartDataRaw = prepareChartData(hcfaData, patientData.measurement?.headCircumference, 'patientHC')
-  const bmifaChartDataRaw = prepareChartData(bmifaData, patientBMI, 'patientBMI')
-  const acfaChartDataRaw = prepareChartData(acfaData, patientData.measurement?.armCircumference, 'patientACFA')
-  const ssfaChartDataRaw = prepareChartData(ssfaData, patientData.measurement?.subscapularSkinfold, 'patientSSFA')
-  const tsfaChartDataRaw = prepareChartData(tsfaData, patientData.measurement?.tricepsSkinfold, 'patientTSFA')
-  const whChartData = prepareWeightHeightData()
+  const patientBMI = useMemo(() => 
+    calculateBMI(patientData.measurement?.weight, patientData.measurement?.height),
+    [calculateBMI, patientData.measurement?.weight, patientData.measurement?.height]
+  )
+
+  const wfaChartDataRaw = useMemo(() => 
+    prepareChartData(wfaData, patientData.measurement?.weight, 'patientWeight'),
+    [prepareChartData, wfaData, patientData.measurement?.weight]
+  )
+  const hfaChartDataRaw = useMemo(() => 
+    prepareChartData(hfaData, patientData.measurement?.height, 'patientHeight'),
+    [prepareChartData, hfaData, patientData.measurement?.height]
+  )
+  const hcfaChartDataRaw = useMemo(() => 
+    prepareChartData(hcfaData, patientData.measurement?.headCircumference, 'patientHC'),
+    [prepareChartData, hcfaData, patientData.measurement?.headCircumference]
+  )
+  const bmifaChartDataRaw = useMemo(() => 
+    prepareChartData(bmifaData, patientBMI, 'patientBMI'),
+    [prepareChartData, bmifaData, patientBMI]
+  )
+  const acfaChartDataRaw = useMemo(() => 
+    prepareChartData(acfaData, patientData.measurement?.armCircumference, 'patientACFA'),
+    [prepareChartData, acfaData, patientData.measurement?.armCircumference]
+  )
+  const ssfaChartDataRaw = useMemo(() => 
+    prepareChartData(ssfaData, patientData.measurement?.subscapularSkinfold, 'patientSSFA'),
+    [prepareChartData, ssfaData, patientData.measurement?.subscapularSkinfold]
+  )
+  const tsfaChartDataRaw = useMemo(() => 
+    prepareChartData(tsfaData, patientData.measurement?.tricepsSkinfold, 'patientTSFA'),
+    [prepareChartData, tsfaData, patientData.measurement?.tricepsSkinfold]
+  )
+  const whChartData = useMemo(() => prepareWeightHeightData(), [prepareWeightHeightData])
   
-  const wfaChartData = filterDataByAge(wfaChartDataRaw)
-  const hfaChartData = filterDataByAge(hfaChartDataRaw)
-  const hcfaChartData = filterDataByAge(hcfaChartDataRaw)
-  const bmifaChartData = filterDataByAge(bmifaChartDataRaw)
-  const acfaChartData = filterDataByAge(acfaChartDataRaw)
-  const ssfaChartData = filterDataByAge(ssfaChartDataRaw)
-  const tsfaChartData = filterDataByAge(tsfaChartDataRaw)
+  const wfaChartData = useMemo(() => filterDataByAge(wfaChartDataRaw), [filterDataByAge, wfaChartDataRaw])
+  const hfaChartData = useMemo(() => filterDataByAge(hfaChartDataRaw), [filterDataByAge, hfaChartDataRaw])
+  const hcfaChartData = useMemo(() => filterDataByAge(hcfaChartDataRaw), [filterDataByAge, hcfaChartDataRaw])
+  const bmifaChartData = useMemo(() => filterDataByAge(bmifaChartDataRaw), [filterDataByAge, bmifaChartDataRaw])
+  const acfaChartData = useMemo(() => filterDataByAge(acfaChartDataRaw), [filterDataByAge, acfaChartDataRaw])
+  const ssfaChartData = useMemo(() => filterDataByAge(ssfaChartDataRaw), [filterDataByAge, ssfaChartDataRaw])
+  const tsfaChartData = useMemo(() => filterDataByAge(tsfaChartDataRaw), [filterDataByAge, tsfaChartDataRaw])
 
-  const getNumericPercentile = (percentileStr) => {
+  const getNumericPercentile = useCallback((percentileStr) => {
     if (!percentileStr) return -1
     if (percentileStr.startsWith('<')) return 0
     if (percentileStr.startsWith('>')) return 100
     const match = percentileStr.match(/(\d+\.?\d*)/)
     return match ? parseFloat(match[1]) : -1
-  }
+  }, [])
 
   // Optimized margins to minimize whitespace
-  const getChartMargins = () => {
+  const getChartMargins = useCallback(() => {
     return { top: 5, right: 0, left: 5, bottom: 40 }
-  }
+  }, [])
 
-  const renderPercentileLines = (type, dataKeyPrefix, patientDataKey, patientValue) => {
+  const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, patientValue) => {
     const patientPercentile = getPatientPercentile(patientValue, type)
     const patientNumeric = getNumericPercentile(patientPercentile)
     
@@ -899,9 +887,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     return renderAllPercentiles(insertAt)
-  }
+  }, [getPatientPercentile, getNumericPercentile])
 
-  const renderWeightForHeightLines = (patientWeight, patientHeight) => {
+  const renderWeightForHeightLines = useCallback((patientWeight, patientHeight) => {
     const patientPercentile = getWeightForHeightPercentile(patientWeight, patientHeight)
     const patientNumeric = getNumericPercentile(patientPercentile)
     
@@ -963,7 +951,15 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     return renderAllPercentiles(insertAt)
-  }
+  }, [getWeightForHeightPercentile, getNumericPercentile])
+
+  // Early returns after all hooks
+  if (loading) return <div className="loading">Loading reference data...</div>
+  if (!patientData.gender) return <div className="no-data">Please select gender to view growth charts</div>
+  if (!patientData.measurement) return <div className="no-data">Please add a measurement to view growth charts</div>
+  if (!wfaData && !hfaData && !hcfaData) return <div className="no-data">No reference data available</div>
+
+  const ageLabel = measurementAge < 2 ? 'Age (Months)' : 'Age (Years)'
 
   return (
     <div className="growth-charts">
@@ -978,7 +974,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <div className="chart-container">
           <h3>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={wfaChartData || []} margin={getChartMargins()}>
+            <LineChart 
+              data={wfaChartData || []} 
+              margin={getChartMargins()}
+              syncId="growth-charts"
+              isAnimationActive={false}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
                 dataKey="ageYears"
@@ -1010,7 +1011,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <div className="chart-container">
           <h3>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={hfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+            <LineChart data={hfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
                 dataKey="ageYears"
@@ -1074,7 +1075,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <div className="chart-container">
           <h3>BMI-for-Age <span className="chart-source">(WHO)</span></h3>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={bmifaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+            <LineChart data={bmifaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
                 dataKey="ageYears"
@@ -1115,7 +1116,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             <div className="chart-container">
               <h3>Mid-Upper Arm Circumference-for-Age <span className="chart-source">(WHO)</span></h3>
               <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={acfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+                <LineChart data={acfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
                     dataKey="ageYears"
@@ -1147,7 +1148,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             <div className="chart-container">
               <h3>Subscapular Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
               <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={ssfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+                <LineChart data={ssfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
                     dataKey="ageYears"
@@ -1179,7 +1180,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             <div className="chart-container">
               <h3>Triceps Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
               <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={tsfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+                <LineChart data={tsfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
                     dataKey="ageYears"
@@ -1216,7 +1217,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           <div className="chart-container">
             <h3>Weight-for-Height <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
             <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={whChartData} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+              <LineChart data={whChartData} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis 
                   dataKey="height"
