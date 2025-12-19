@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, memo } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, ResponsiveContainer, LabelList } from 'recharts'
 import Papa from 'papaparse'
 import './GrowthCharts.css'
 
@@ -157,6 +157,34 @@ const OrderedLegend = memo(({ payload, percentiles = ['97th', '85th', '75th', '5
     </ul>
   )
 })
+
+// Custom label renderer for end of line labels - only shows at last point
+const createEndLabel = (name, color, isPatient = false) => {
+  return ({ viewBox, value, payload }) => {
+    // Only show label if there's a value and this is the last data point
+    if (value == null || !viewBox) return null
+    
+    // Check if this is the last point by seeing if payload exists and has ageYears
+    // We'll render the label at the right edge
+    const { x, y, width } = viewBox
+    const labelX = x + width + 5 // Position to the right of the chart
+    const labelY = y
+    
+    return (
+      <text
+        x={labelX}
+        y={labelY}
+        fill={color}
+        fontSize="11px"
+        fontWeight={isPatient ? 'bold' : 'normal'}
+        dominantBaseline="middle"
+        style={{ pointerEvents: 'none', userSelect: 'none' }}
+      >
+        {name}
+      </text>
+    )
+  }
+}
 
 // Custom Tooltip component that sorts items by percentile (highest first)
 const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter }) => {
@@ -820,14 +848,58 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return match ? parseFloat(match[1]) : -1
   }, [])
 
-  // Optimized margins to minimize whitespace
+  // Optimized margins - minimal right margin for labels, maximum space for chart
   const getChartMargins = useCallback(() => {
-    return { top: 5, right: 0, left: 5, bottom: 40 }
+    return { top: 5, right: 40, left: 5, bottom: 40 }
   }, [])
 
-  const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, patientValue) => {
+  const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, patientValue, chartData) => {
     const patientPercentile = getPatientPercentile(patientValue, type)
     const patientNumeric = getNumericPercentile(patientPercentile)
+    
+    // Get the last valid index for this data
+    const dataLength = chartData?.length || 0
+    const lastIndex = dataLength > 0 ? dataLength - 1 : -1
+    
+    // Create label component factory that captures line properties
+    const createEndLabel = (lineName, lineColor, isPatient = false) => {
+      return ({ x, y, value, index }) => {
+        // Only show label at the last data point and if value exists
+        if (value == null || value === undefined || index !== lastIndex) return null
+        return (
+          <text
+            x={x + 5}
+            y={y}
+            fill={lineColor}
+            fontSize="11px"
+            fontWeight={isPatient ? 'bold' : 'normal'}
+            dominantBaseline="middle"
+            style={{ pointerEvents: 'none', userSelect: 'none' }}
+          >
+            {lineName}
+          </text>
+        )
+      }
+    }
+    
+    // Custom label for patient point that shows at the actual point location
+    const PatientPointLabel = ({ x, y, value }) => {
+      // Show label at the patient's point (wherever value exists, not just last point)
+      if (value == null || value === undefined || !patientPercentile) return null
+      return (
+        <text
+          x={x + 10}
+          y={y}
+          fill="#000"
+          fontSize="11px"
+          fontWeight="bold"
+          dominantBaseline="middle"
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+        >
+          {patientPercentile}
+        </text>
+      )
+    }
     
     const patientLine = (
       <Line 
@@ -840,19 +912,35 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         activeDot={false}
         name={patientPercentile || ''}
         connectNulls={false}
-      />
+      >
+        <LabelList content={<PatientPointLabel />} />
+      </Line>
     )
     
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" />,
-        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" />,
-        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" />,
-        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" />,
-        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" />,
-        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" />,
-        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" />,
+        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th">
+          <LabelList content={createEndLabel('97th', '#ff6b6b')} position="right" />
+        </Line>,
+        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th">
+          <LabelList content={createEndLabel('85th', '#ffa500')} position="right" />
+        </Line>,
+        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th">
+          <LabelList content={createEndLabel('75th', '#95a5a6')} position="right" />
+        </Line>,
+        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th">
+          <LabelList content={createEndLabel('50th', '#4ecdc4')} position="right" />
+        </Line>,
+        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th">
+          <LabelList content={createEndLabel('25th', '#95a5a6')} position="right" />
+        </Line>,
+        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th">
+          <LabelList content={createEndLabel('15th', '#ffa500')} position="right" />
+        </Line>,
+        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd">
+          <LabelList content={createEndLabel('3rd', '#ff6b6b')} position="right" />
+        </Line>,
       ]
       
       if (insertPatientAt >= 0 && insertPatientAt < lines.length) {
@@ -889,9 +977,53 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return renderAllPercentiles(insertAt)
   }, [getPatientPercentile, getNumericPercentile])
 
-  const renderWeightForHeightLines = useCallback((patientWeight, patientHeight) => {
+  const renderWeightForHeightLines = useCallback((patientWeight, patientHeight, chartData) => {
     const patientPercentile = getWeightForHeightPercentile(patientWeight, patientHeight)
     const patientNumeric = getNumericPercentile(patientPercentile)
+    
+    // Get the last valid index for this data
+    const dataLength = chartData?.length || 0
+    const lastIndex = dataLength > 0 ? dataLength - 1 : -1
+    
+    // Create label component factory that captures line properties
+    const createEndLabel = (lineName, lineColor, isPatient = false) => {
+      return ({ x, y, value, index }) => {
+        // Only show label at the last data point and if value exists
+        if (value == null || value === undefined || index !== lastIndex) return null
+        return (
+          <text
+            x={x + 5}
+            y={y}
+            fill={lineColor}
+            fontSize="11px"
+            fontWeight={isPatient ? 'bold' : 'normal'}
+            dominantBaseline="middle"
+            style={{ pointerEvents: 'none', userSelect: 'none' }}
+          >
+            {lineName}
+          </text>
+        )
+      }
+    }
+    
+    // Custom label for patient point that shows at the actual point location
+    const PatientPointLabel = ({ x, y, value }) => {
+      // Show label at the patient's point (wherever value exists, not just last point)
+      if (value == null || value === undefined || !patientPercentile) return null
+      return (
+        <text
+          x={x + 10}
+          y={y}
+          fill="#000"
+          fontSize="11px"
+          fontWeight="bold"
+          dominantBaseline="middle"
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+        >
+          {patientPercentile}
+        </text>
+      )
+    }
     
     const patientLine = (
       <Line 
@@ -904,19 +1036,35 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         activeDot={false}
         name={patientPercentile || ''}
         connectNulls={false}
-      />
+      >
+        <LabelList content={<PatientPointLabel />} />
+      </Line>
     )
     
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" />,
-        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" />,
-        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" />,
-        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" />,
-        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" />,
-        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" />,
-        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" />,
+        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th">
+          <LabelList content={createEndLabel('97th', '#ff6b6b')} position="right" />
+        </Line>,
+        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th">
+          <LabelList content={createEndLabel('85th', '#ffa500')} position="right" />
+        </Line>,
+        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th">
+          <LabelList content={createEndLabel('75th', '#95a5a6')} position="right" />
+        </Line>,
+        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th">
+          <LabelList content={createEndLabel('50th', '#4ecdc4')} position="right" />
+        </Line>,
+        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th">
+          <LabelList content={createEndLabel('25th', '#95a5a6')} position="right" />
+        </Line>,
+        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th">
+          <LabelList content={createEndLabel('15th', '#ffa500')} position="right" />
+        </Line>,
+        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd">
+          <LabelList content={createEndLabel('3rd', '#ff6b6b')} position="right" />
+        </Line>,
       ]
       
       if (insertPatientAt >= 0 && insertPatientAt < lines.length) {
@@ -993,14 +1141,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], patientData.measurement.weight)}
                 label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
               />
-              <Legend 
-                layout="vertical"
-                align="right"
-                verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-              />
-              {renderPercentileLines('weight', 'weight', 'patientWeight', patientData.measurement.weight)}
+              {/* Legend removed - labels now appear at end of lines */}
+              {renderPercentileLines('weight', 'weight', 'patientWeight', patientData.measurement.weight, wfaChartData)}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -1011,7 +1153,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <div className="chart-container">
           <h3>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={hfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
+            <LineChart data={hfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
                 dataKey="ageYears"
@@ -1025,14 +1167,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], patientData.measurement.height)}
                 label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} 
               />
-              <Legend 
-                layout="vertical"
-                align="right"
-                verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-              />
-              {renderPercentileLines('height', 'height', 'patientHeight', patientData.measurement.height)}
+              {/* Legend removed - labels now appear at end of lines */}
+              {renderPercentileLines('height', 'height', 'patientHeight', patientData.measurement.height, hfaChartData)}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -1043,7 +1179,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <div className="chart-container">
           <h3>Head Circumference-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={hcfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+            <LineChart data={hcfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
                 dataKey="ageYears"
@@ -1057,14 +1193,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], patientData.measurement.headCircumference)}
                 label={{ value: 'Head Circumference (cm)', angle: -90, position: 'insideLeft' }} 
               />
-              <Legend 
-                layout="vertical"
-                align="right"
-                verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-              />
-              {renderPercentileLines('hc', 'hc', 'patientHC', patientData.measurement.headCircumference)}
+              {/* Legend removed - labels now appear at end of lines */}
+              {renderPercentileLines('hc', 'hc', 'patientHC', patientData.measurement.headCircumference, hcfaChartData)}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -1075,7 +1205,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <div className="chart-container">
           <h3>BMI-for-Age <span className="chart-source">(WHO)</span></h3>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={bmifaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
+            <LineChart data={bmifaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
                 dataKey="ageYears"
@@ -1089,14 +1219,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], patientBMI)}
                 label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} 
               />
-              <Legend 
-                layout="vertical"
-                align="right"
-                verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-              />
-              {renderPercentileLines('bmi', 'bmi', 'patientBMI', patientBMI)}
+              {/* Legend removed - labels now appear at end of lines */}
+              {renderPercentileLines('bmi', 'bmi', 'patientBMI', patientBMI, bmifaChartData)}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -1116,7 +1240,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             <div className="chart-container">
               <h3>Mid-Upper Arm Circumference-for-Age <span className="chart-source">(WHO)</span></h3>
               <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={acfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
+                <LineChart data={acfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
                     dataKey="ageYears"
@@ -1137,7 +1261,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                     content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
                   />
-                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', patientData.measurement.armCircumference)}
+                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', patientData.measurement.armCircumference, acfaChartData)}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1148,7 +1272,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             <div className="chart-container">
               <h3>Subscapular Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
               <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={ssfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
+                <LineChart data={ssfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
                     dataKey="ageYears"
@@ -1169,7 +1293,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                     content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
                   />
-                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', patientData.measurement.subscapularSkinfold)}
+                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', patientData.measurement.subscapularSkinfold, ssfaChartData)}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1180,7 +1304,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             <div className="chart-container">
               <h3>Triceps Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
               <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={tsfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
+                <LineChart data={tsfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
                     dataKey="ageYears"
@@ -1201,7 +1325,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                     content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
                   />
-                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', patientData.measurement.tricepsSkinfold)}
+                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', patientData.measurement.tricepsSkinfold, tsfaChartData)}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1217,7 +1341,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           <div className="chart-container">
             <h3>Weight-for-Height <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
             <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={whChartData} margin={{ top: 5, right: 10, left: 20, bottom: 40 }} isAnimationActive={false}>
+              <LineChart data={whChartData} margin={getChartMargins()} isAnimationActive={false}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis 
                   dataKey="height"
@@ -1226,18 +1350,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   domain={['dataMin', 'dataMax']}
                   label={{ value: 'Height (cm)', position: 'insideBottom', offset: -10 }}
                 />
-                <YAxis 
+                <YAxis
                   domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], patientData.measurement.weight)}
-                  label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
+                  label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }}
                 />
-                <Legend 
-                  layout="vertical"
-                  align="right"
-                  verticalAlign="middle"
-                  wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                  content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-                />
-                {renderWeightForHeightLines(patientData.measurement.weight, patientData.measurement.height)}
+                {/* Legend removed - labels now appear at end of lines */}
+                {renderWeightForHeightLines(patientData.measurement.weight, patientData.measurement.height, whChartData)}
               </LineChart>
             </ResponsiveContainer>
             <p className="chart-note" style={{fontSize: '0.8rem', color: '#666', marginTop: '10px'}}>
