@@ -32,7 +32,7 @@
 
 .chart-container {
   margin-bottom: 2rem;
-  padding: 1.5rem;
+  padding: 1rem;
   background: #f8f9fa;
   border-radius: 8px;
   width: 100%;
@@ -140,7 +140,7 @@
 
 @media (max-width: 767px) {
   .chart-container {
-    padding: 1rem;
+    padding: 0.5rem;
   }
 
   .growth-charts h2 {
@@ -164,5 +164,11 @@
   .source-group {
     min-width: 100%;
   }
+}
+
+/* Minimize legend space on the right */
+.recharts-legend-wrapper {
+  padding-right: 0 !important;
+  margin-right: 0 !important;
 }
 
