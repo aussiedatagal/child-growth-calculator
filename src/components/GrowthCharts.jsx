@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, ResponsiveContainer } from 'recharts'
 import Papa from 'papaparse'
 import './GrowthCharts.css'
 
@@ -101,21 +101,17 @@ const OrderedLegend = ({ payload, percentiles = ['97th', '85th', '75th', '50th',
     if (!item) return
     const label = item.value || item.dataKey || ''
     let percentile = -1
+    const isStandardPercentile = percentiles.some(p => label === p || label.startsWith(p))
     
-    if (label.includes('Patient')) {
-      // Extract percentile from patient label like "Patient (45.2th)"
-      const patientPercentileStr = label.match(/\(([^)]+)\)/)?.[1] || ''
-      percentile = getNumericPercentileFromLabel(patientPercentileStr)
-    } else {
-      // Extract percentile from standard labels like "97th", "50th", etc.
-      const isPercentile = percentiles.some(p => label.startsWith(p))
-      if (isPercentile) {
-        percentile = getNumericPercentileFromLabel(label)
-      }
-    }
+    // Extract percentile from label (works for both standard and patient percentiles)
+    percentile = getNumericPercentileFromLabel(label)
     
-    if (percentile >= 0 || label.includes('Patient')) {
-      allItems.push({ item, percentile, label })
+    // If it's a percentile (standard or patient), include it
+    // Patient lines are identified by: black color (#000) and non-standard percentile
+    const isPatient = item.color === '#000' && percentile >= 0 && !isStandardPercentile
+    
+    if (percentile >= 0 || isPatient) {
+      allItems.push({ item, percentile, label, isPatient })
     }
   })
   
@@ -129,20 +125,19 @@ const OrderedLegend = ({ payload, percentiles = ['97th', '85th', '75th', '50th',
     return 0
   })
   
-  const sortedItems = allItems.map(entry => entry.item)
-  
   return (
     <ul style={{ padding: 0, margin: 0, listStyle: 'none' }}>
-      {sortedItems.map((entry, i) => {
-        const label = entry.value || entry.dataKey || ''
-        const isPatient = label.includes('Patient')
+      {allItems.map((entry, i) => {
+        const item = entry.item
+        const label = item.value || item.dataKey || ''
+        const isPatient = entry.isPatient || false
         return (
           <li key={i} style={{ display: 'flex', marginBottom: '4px', alignItems: 'center' }}>
             <svg width="14" height="14" style={{ marginRight: '4px', display: 'inline-block', verticalAlign: 'middle' }}>
               {isPatient ? (
                 <>
-                  <circle cx="7" cy="7" r="4" fill={entry.color || '#000'} stroke="#fff" strokeWidth="1" />
-                  <line x1="7" y1="2" x2="7" y2="12" stroke={entry.color || '#000'} strokeWidth="2" />
+                  <circle cx="7" cy="7" r="4" fill={item.color || '#000'} stroke="#fff" strokeWidth="1" />
+                  <line x1="7" y1="2" x2="7" y2="12" stroke={item.color || '#000'} strokeWidth="2" />
                 </>
               ) : (
                 <line 
@@ -150,12 +145,12 @@ const OrderedLegend = ({ payload, percentiles = ['97th', '85th', '75th', '50th',
                   y1="7" 
                   x2="14" 
                   y2="7" 
-                  stroke={entry.color} 
-                  strokeWidth={entry.payload?.strokeWidth || 2} 
+                  stroke={item.color} 
+                  strokeWidth={item.payload?.strokeWidth || 2} 
                 />
               )}
             </svg>
-            <span style={{ color: entry.color, fontSize: '12px', fontWeight: isPatient ? 'bold' : 'normal' }}>{label}</span>
+            <span style={{ color: item.color, fontSize: '12px', fontWeight: isPatient ? 'bold' : 'normal' }}>{label}</span>
           </li>
         )
       })}
@@ -174,21 +169,11 @@ const OrderedTooltip = ({ active, payload, label, labelFormatter, formatter }) =
     
     // Extract numeric percentile from names
     const getPercentile = (name) => {
-      if (name.includes('Patient')) {
-        const match = name.match(/\(([^)]+)\)/)
-        if (match) {
-          const pctStr = match[1]
-          if (pctStr.includes('>')) return 100
-          if (pctStr.includes('<')) return 0
-          const numMatch = pctStr.match(/(\d+\.?\d*)/)
-          return numMatch ? parseFloat(numMatch[1]) : -1
-        }
-      } else {
-        // Extract from names like "97th percentile", "50th percentile", or just "97th"
-        const match = name.match(/(\d+\.?\d*)/)
-        return match ? parseFloat(match[1]) : -1
-      }
-      return -1
+      // Extract from names like "97th percentile", "50th percentile", "45.2th", or just "97th"
+      if (name.includes('>')) return 100
+      if (name.includes('<')) return 0
+      const match = name.match(/(\d+\.?\d*)/)
+      return match ? parseFloat(match[1]) : -1
     }
     
     const aPct = getPercentile(aName)
@@ -218,9 +203,11 @@ const OrderedTooltip = ({ active, payload, label, labelFormatter, formatter }) =
             ? formatter(entry.value, entry.name, entry, index, entry.payload)
             : [entry.value, entry.name]
           const [value, name] = Array.isArray(result) ? result : [result, entry.name]
+          // Patient lines are black (#000)
+          const isPatient = entry.color === '#000'
           return (
             <li key={index} style={{ marginBottom: '4px', color: entry.color }}>
-              <span style={{ fontWeight: name === 'Patient' || name?.includes('Patient') ? 'bold' : 'normal' }}>
+              <span style={{ fontWeight: isPatient ? 'bold' : 'normal' }}>
                 {name}: {value}
               </span>
             </li>
@@ -845,6 +832,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return match ? parseFloat(match[1]) : -1
   }
 
+  // Optimized margins to minimize whitespace
+  const getChartMargins = () => {
+    return { top: 5, right: 0, left: 5, bottom: 40 }
+  }
+
   const renderPercentileLines = (type, dataKeyPrefix, patientDataKey, patientValue) => {
     const patientPercentile = getPatientPercentile(patientValue, type)
     const patientNumeric = getNumericPercentile(patientPercentile)
@@ -857,7 +849,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         stroke="#000" 
         strokeWidth={3} 
         dot={{ r: 8, fill: '#000', stroke: '#fff', strokeWidth: 2 }}
-        name={patientPercentile ? `Patient (${patientPercentile})` : 'Patient'}
+        activeDot={false}
+        name={patientPercentile || ''}
         connectNulls={false}
       />
     )
@@ -865,13 +858,13 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} name="97th" />,
-        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} name="85th" />,
-        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} name="75th" />,
-        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} name="50th" />,
-        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} name="25th" />,
-        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} name="15th" />,
-        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} name="3rd" />,
+        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" />,
+        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" />,
+        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" />,
+        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" />,
+        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" />,
+        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" />,
+        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" />,
       ]
       
       if (insertPatientAt >= 0 && insertPatientAt < lines.length) {
@@ -920,7 +913,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         stroke="#000" 
         strokeWidth={3} 
         dot={{ r: 8, fill: '#000', stroke: '#fff', strokeWidth: 2 }}
-        name={patientPercentile ? `Patient (${patientPercentile})` : 'Patient'}
+        activeDot={false}
+        name={patientPercentile || ''}
         connectNulls={false}
       />
     )
@@ -928,13 +922,13 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} name="97th" />,
-        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} name="85th" />,
-        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} name="75th" />,
-        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} name="50th" />,
-        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} name="25th" />,
-        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} name="15th" />,
-        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} name="3rd" />,
+        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" />,
+        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" />,
+        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" />,
+        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" />,
+        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" />,
+        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" />,
+        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" />,
       ]
       
       if (insertPatientAt >= 0 && insertPatientAt < lines.length) {
@@ -984,7 +978,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <div className="chart-container">
           <h3>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={wfaChartData || []} margin={{ top: 5, right: 10, left: 20, bottom: 40 }}>
+            <LineChart data={wfaChartData || []} margin={getChartMargins()}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
                 dataKey="ageYears"
@@ -998,18 +992,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], patientData.measurement.weight)}
                 label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
               />
-              <Tooltip 
-                content={(props) => <OrderedTooltip 
-                  {...props}
-                  formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' kg', 'Patient'] : [value?.toFixed(1) + ' kg', name + ' percentile']}
-                  labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
-                />}
-              />
               <Legend 
                 layout="vertical"
                 align="right"
                 verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '10px' }}
+                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                 content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
               />
               {renderPercentileLines('weight', 'weight', 'patientWeight', patientData.measurement.weight)}
@@ -1037,18 +1024,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], patientData.measurement.height)}
                 label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} 
               />
-              <Tooltip 
-                content={(props) => <OrderedTooltip 
-                  {...props}
-                  formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' cm', 'Patient'] : [value?.toFixed(1) + ' cm', name + ' percentile']}
-                  labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
-                />}
-              />
               <Legend 
                 layout="vertical"
                 align="right"
                 verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '10px' }}
+                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                 content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
               />
               {renderPercentileLines('height', 'height', 'patientHeight', patientData.measurement.height)}
@@ -1076,18 +1056,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], patientData.measurement.headCircumference)}
                 label={{ value: 'Head Circumference (cm)', angle: -90, position: 'insideLeft' }} 
               />
-              <Tooltip 
-                content={(props) => <OrderedTooltip 
-                  {...props}
-                  formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' cm', 'Patient'] : [value?.toFixed(1) + ' cm', name + ' percentile']}
-                  labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
-                />}
-              />
               <Legend 
                 layout="vertical"
                 align="right"
                 verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '10px' }}
+                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                 content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
               />
               {renderPercentileLines('hc', 'hc', 'patientHC', patientData.measurement.headCircumference)}
@@ -1115,18 +1088,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], patientBMI)}
                 label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} 
               />
-              <Tooltip 
-                content={(props) => <OrderedTooltip 
-                  {...props}
-                  formatter={(value, name) => name === 'Patient' ? [value?.toFixed(2) + ' kg/m²', 'Patient'] : [value?.toFixed(2) + ' kg/m²', name + ' percentile']}
-                  labelFormatter={(label) => `Age: ${formatAgeLabel(parseFloat(label))}`}
-                />}
-              />
               <Legend 
                 layout="vertical"
                 align="right"
                 verticalAlign="middle"
-                wrapperStyle={{ paddingLeft: '10px' }}
+                wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                 content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
               />
               {renderPercentileLines('bmi', 'bmi', 'patientBMI', patientBMI)}
@@ -1163,22 +1129,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], patientData.measurement.armCircumference)}
                     label={{ value: 'Arm Circumference (cm)', angle: -90, position: 'insideLeft' }} 
                   />
-                  <Tooltip
-                    content={(props) => <OrderedTooltip
-                      {...props}
-                      formatter={(value, name) =>
-                        name === 'Patient'
-                          ? [value?.toFixed(1) + ' cm', 'Patient']
-                          : [value?.toFixed(1) + ' cm', name + ' percentile']
-                      }
-                      labelFormatter={label => `Age: ${formatAgeLabel(parseFloat(label))}`}
-                    />}
-                  />
                   <Legend
                     layout="vertical"
                     align="right"
                     verticalAlign="middle"
-                    wrapperStyle={{ paddingLeft: '10px' }}
+                    wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                     content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
                   />
                   {renderPercentileLines('acfa', 'acfa', 'patientACFA', patientData.measurement.armCircumference)}
@@ -1206,22 +1161,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], patientData.measurement.subscapularSkinfold)}
                     label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
                   />
-                  <Tooltip
-                    content={(props) => <OrderedTooltip
-                      {...props}
-                      formatter={(value, name) =>
-                        name === 'Patient'
-                          ? [value?.toFixed(1) + ' mm', 'Patient']
-                          : [value?.toFixed(1) + ' mm', name + ' percentile']
-                      }
-                      labelFormatter={label => `Age: ${formatAgeLabel(parseFloat(label))}`}
-                    />}
-                  />
                   <Legend
                     layout="vertical"
                     align="right"
                     verticalAlign="middle"
-                    wrapperStyle={{ paddingLeft: '10px' }}
+                    wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                     content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
                   />
                   {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', patientData.measurement.subscapularSkinfold)}
@@ -1249,22 +1193,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], patientData.measurement.tricepsSkinfold)}
                     label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
                   />
-                  <Tooltip
-                    content={(props) => <OrderedTooltip
-                      {...props}
-                      formatter={(value, name) =>
-                        name === 'Patient'
-                          ? [value?.toFixed(1) + ' mm', 'Patient']
-                          : [value?.toFixed(1) + ' mm', name + ' percentile']
-                      }
-                      labelFormatter={label => `Age: ${formatAgeLabel(parseFloat(label))}`}
-                    />}
-                  />
                   <Legend
                     layout="vertical"
                     align="right"
                     verticalAlign="middle"
-                    wrapperStyle={{ paddingLeft: '10px' }}
+                    wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                     content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
                   />
                   {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', patientData.measurement.tricepsSkinfold)}
@@ -1296,18 +1229,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], patientData.measurement.weight)}
                   label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
                 />
-                <Tooltip 
-                  content={(props) => <OrderedTooltip 
-                    {...props}
-                    formatter={(value, name) => name === 'Patient' ? [value?.toFixed(1) + ' kg', 'Patient'] : [value?.toFixed(1) + ' kg', name + ' percentile']}
-                    labelFormatter={(label) => `Height: ${parseFloat(label).toFixed(1)} cm`}
-                  />}
-                />
                 <Legend 
                   layout="vertical"
                   align="right"
                   verticalAlign="middle"
-                  wrapperStyle={{ paddingLeft: '10px' }}
+                  wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
                   content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
                 />
                 {renderWeightForHeightLines(patientData.measurement.weight, patientData.measurement.height)}
