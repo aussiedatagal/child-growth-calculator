@@ -37,6 +37,15 @@
   border-radius: 8px;
   width: 100%;
   box-sizing: border-box;
+  overflow: visible;
+}
+
+.chart-container .recharts-wrapper {
+  overflow: visible !important;
+}
+
+.chart-container .recharts-surface {
+  overflow: visible !important;
 }
 
 .chart-scroll-wrapper {
@@ -91,6 +100,28 @@
   padding: 2rem;
   color: #666;
   font-size: 1.1rem;
+}
+
+.chart-spinner-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  width: 100%;
+}
+
+.spinner {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #667eea;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .data-source-selector {
