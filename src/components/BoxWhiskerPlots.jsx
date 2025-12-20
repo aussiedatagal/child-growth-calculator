@@ -319,8 +319,19 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   const getWeightHeightReference = () => {
     if (!weightHeightData || !patientData.measurements || patientData.measurements.length === 0) return null
     
-    // Use the last measurement
-    const lastMeasurement = patientData.measurements[patientData.measurements.length - 1]
+    // Get the latest measurement that has both weight and height
+    const measurementsWithBoth = patientData.measurements
+      .filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
+      .sort((a, b) => {
+        const dateA = new Date(a.date || 0)
+        const dateB = new Date(b.date || 0)
+        return dateA - dateB
+      })
+    
+    const lastMeasurement = measurementsWithBoth.length > 0 
+      ? measurementsWithBoth[measurementsWithBoth.length - 1]
+      : null
+    
     if (!lastMeasurement || !lastMeasurement.height) return null
     
     const patientHeight = lastMeasurement.height
@@ -344,12 +355,49 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     return null
   }
 
-  // Use the last measurement for box plots
-  const measurement = patientData.measurements[patientData.measurements.length - 1]
-
   const getSourceLabel = (source) => (source === 'cdc' ? 'CDC' : 'WHO')
 
-  const getClosestRefByAge = (data) => {
+  // Helper function to get the latest measurement for a specific field
+  const getLatestMeasurementForField = (fieldName) => {
+    if (!patientData.measurements || patientData.measurements.length === 0) return null
+    
+    // Filter to measurements that have this field with a valid value
+    const measurementsWithValue = patientData.measurements.filter(m => {
+      const value = m[fieldName]
+      return value != null && value !== undefined && value > 0
+    })
+    
+    if (measurementsWithValue.length === 0) return null
+    
+    // Sort by date and get the latest one
+    const sortedByDate = measurementsWithValue.sort((a, b) => {
+      const dateA = new Date(a.date || 0)
+      const dateB = new Date(b.date || 0)
+      return dateA - dateB
+    })
+    
+    return sortedByDate[sortedByDate.length - 1]
+  }
+
+  // Get latest measurement for each type
+  const weightMeasurement = getLatestMeasurementForField('weight')
+  const heightMeasurement = getLatestMeasurementForField('height')
+  const hcMeasurement = getLatestMeasurementForField('headCircumference')
+  const acfaMeasurement = getLatestMeasurementForField('armCircumference')
+  const ssfaMeasurement = getLatestMeasurementForField('subscapularSkinfold')
+  const tsfaMeasurement = getLatestMeasurementForField('tricepsSkinfold')
+  
+  // For BMI and Weight-for-Height, we need both weight and height
+  const weightHeightMeasurement = patientData.measurements
+    .filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
+    .sort((a, b) => {
+      const dateA = new Date(a.date || 0)
+      const dateB = new Date(b.date || 0)
+      return dateA - dateB
+    })
+    .pop() || null
+
+  const getClosestRefByAge = (data, measurement) => {
     if (!data || !measurement) return null
     const patientAge = measurement.ageYears
     return data.reduce((closest, item) => {
@@ -360,16 +408,19 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     }, null)
   }
 
-  const weightRef = getClosestRefByAge(wfaData)
-  const heightRef = getClosestRefByAge(hfaData)
-  const hcRef = getClosestRefByAge(hcfaData)
-  const bmiRef = getClosestRefByAge(bmifaData)
-  const acfaRef = getClosestRefByAge(acfaData)
-  const ssfaRef = getClosestRefByAge(ssfaData)
-  const tsfaRef = getClosestRefByAge(tsfaData)
-  const patientBMI = calculateBMI(measurement.weight, measurement.height)
+  const weightRef = getClosestRefByAge(wfaData, weightMeasurement)
+  const heightRef = getClosestRefByAge(hfaData, heightMeasurement)
+  const hcRef = getClosestRefByAge(hcfaData, hcMeasurement)
+  const bmiRef = getClosestRefByAge(bmifaData, weightHeightMeasurement)
+  const acfaRef = getClosestRefByAge(acfaData, acfaMeasurement)
+  const ssfaRef = getClosestRefByAge(ssfaData, ssfaMeasurement)
+  const tsfaRef = getClosestRefByAge(tsfaData, tsfaMeasurement)
+  
+  const patientBMI = weightHeightMeasurement 
+    ? calculateBMI(weightHeightMeasurement.weight, weightHeightMeasurement.height)
+    : null
 
-  const createBoxPlotData = (p3, p25, p50, p75, p97, patientValue, unit, label, source, L, M, S) => {
+  const createBoxPlotData = (p3, p25, p50, p75, p97, patientValue, unit, label, source, L, M, S, measurementDate) => {
     if (!patientValue) return null
 
     return {
@@ -384,75 +435,80 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       source: source || '',
       L: L,
       M: M,
-      S: S
+      S: S,
+      measurementDate: measurementDate || null
     }
   }
 
-  const heightData = (measurement.height && heightRef)
+  const heightData = (heightMeasurement && heightMeasurement.height && heightRef)
     ? createBoxPlotData(
         heightRef.heightP3,
         heightRef.heightP25,
         heightRef.heightP50,
         heightRef.heightP75,
         heightRef.heightP97,
-        measurement.height,
+        heightMeasurement.height,
         'cm',
         'Height for Age',
         getSourceLabel(referenceSources?.age),
         heightRef.heightL,
         heightRef.heightM,
-        heightRef.heightS
+        heightRef.heightS,
+        heightMeasurement.date
       )
     : null
 
-  const weightData = (measurement.weight && weightRef)
+  const weightData = (weightMeasurement && weightMeasurement.weight && weightRef)
     ? createBoxPlotData(
         weightRef.weightP3,
         weightRef.weightP25,
         weightRef.weightP50,
         weightRef.weightP75,
         weightRef.weightP97,
-        measurement.weight,
+        weightMeasurement.weight,
         'kg',
         'Weight for Age',
         getSourceLabel(referenceSources?.age),
         weightRef.weightL,
         weightRef.weightM,
-        weightRef.weightS
+        weightRef.weightS,
+        weightMeasurement.date
       )
     : null
 
-  const whData = (measurement.height && measurement.weight && whReference)
+  const whData = (weightHeightMeasurement && weightHeightMeasurement.height && weightHeightMeasurement.weight && whReference)
     ? createBoxPlotData(
         whReference.p3,
         whReference.p25,
         whReference.p50,
         whReference.p75,
         whReference.p97,
-        measurement.weight,
+        weightHeightMeasurement.weight,
         'kg',
         'Weight for Height',
         getSourceLabel(referenceSources?.wfh),
         whReference.L,
         whReference.M,
-        whReference.S
+        whReference.S,
+        weightHeightMeasurement.date
       )
     : null
 
-  const hcData = (measurement.headCircumference && hcRef && hcRef.hcP50 != null)
+  const hcData = (hcMeasurement && hcMeasurement.headCircumference && hcRef && hcRef.hcP50 != null)
     ? createBoxPlotData(
         hcRef.hcP3,
         hcRef.hcP25,
         hcRef.hcP50,
         hcRef.hcP75,
         hcRef.hcP97,
-        measurement.headCircumference,
+        hcMeasurement.headCircumference,
         'cm',
         'Head Circumference for Age',
         getSourceLabel(referenceSources?.age),
         hcRef.hcL,
         hcRef.hcM,
-        hcRef.hcS
+        hcRef.hcS,
+        hcMeasurement.date
       )
     : null
 
@@ -469,58 +525,62 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         'WHO',
         bmiRef.bmiL,
         bmiRef.bmiM,
-        bmiRef.bmiS
+        bmiRef.bmiS,
+        weightHeightMeasurement?.date
       )
     : null
 
-  const acfaBoxData = (referenceSources?.age === 'who' && measurement.armCircumference && acfaRef && acfaRef.acfaP50 != null)
+  const acfaBoxData = (referenceSources?.age === 'who' && acfaMeasurement && acfaMeasurement.armCircumference && acfaRef && acfaRef.acfaP50 != null)
     ? createBoxPlotData(
         acfaRef.acfaP3,
         acfaRef.acfaP25,
         acfaRef.acfaP50,
         acfaRef.acfaP75,
         acfaRef.acfaP97,
-        measurement.armCircumference,
+        acfaMeasurement.armCircumference,
         'cm',
         'Mid-Upper Arm Circumference for Age',
         'WHO',
         acfaRef.acfaL,
         acfaRef.acfaM,
-        acfaRef.acfaS
+        acfaRef.acfaS,
+        acfaMeasurement.date
       )
     : null
 
-  const ssfaBoxData = (referenceSources?.age === 'who' && measurement.subscapularSkinfold && ssfaRef && ssfaRef.ssfaP50 != null)
+  const ssfaBoxData = (referenceSources?.age === 'who' && ssfaMeasurement && ssfaMeasurement.subscapularSkinfold && ssfaRef && ssfaRef.ssfaP50 != null)
     ? createBoxPlotData(
         ssfaRef.ssfaP3,
         ssfaRef.ssfaP25,
         ssfaRef.ssfaP50,
         ssfaRef.ssfaP75,
         ssfaRef.ssfaP97,
-        measurement.subscapularSkinfold,
+        ssfaMeasurement.subscapularSkinfold,
         'mm',
         'Subscapular Skinfold for Age',
         'WHO',
         ssfaRef.ssfaL,
         ssfaRef.ssfaM,
-        ssfaRef.ssfaS
+        ssfaRef.ssfaS,
+        ssfaMeasurement.date
       )
     : null
 
-  const tsfaBoxData = (referenceSources?.age === 'who' && measurement.tricepsSkinfold && tsfaRef && tsfaRef.tsfaP50 != null)
+  const tsfaBoxData = (referenceSources?.age === 'who' && tsfaMeasurement && tsfaMeasurement.tricepsSkinfold && tsfaRef && tsfaRef.tsfaP50 != null)
     ? createBoxPlotData(
         tsfaRef.tsfaP3,
         tsfaRef.tsfaP25,
         tsfaRef.tsfaP50,
         tsfaRef.tsfaP75,
         tsfaRef.tsfaP97,
-        measurement.tricepsSkinfold,
+        tsfaMeasurement.tricepsSkinfold,
         'mm',
         'Triceps Skinfold for Age',
         'WHO',
         tsfaRef.tsfaL,
         tsfaRef.tsfaM,
-        tsfaRef.tsfaS
+        tsfaRef.tsfaS,
+        tsfaMeasurement.date
       )
     : null
 
@@ -562,9 +622,28 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       patientPercentile = `${exactPercentile.toFixed(1)}th`
     }
 
+    // Format the measurement date
+    const formatDate = (dateString) => {
+      if (!dateString) return ''
+      try {
+        const date = new Date(dateString)
+        return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      } catch {
+        return dateString
+      }
+    }
+
     return (
       <div key={data.label} className="box-plot-item">
-        <h3>{data.label} ({data.unit}) {data.source && <span className="chart-source">({data.source})</span>}</h3>
+        <h3>
+          {data.label} ({data.unit}) 
+          {data.source && <span className="chart-source">({data.source})</span>}
+          {data.measurementDate && (
+            <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'normal', marginLeft: '0.5rem' }}>
+              - {formatDate(data.measurementDate)}
+            </span>
+          )}
+        </h3>
         <div className="box-plot-content">
           <div className="box-plot-visual">
             <svg width="100%" height="200" viewBox="0 0 380 200" preserveAspectRatio="none">
