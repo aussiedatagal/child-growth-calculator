@@ -4,12 +4,60 @@ import DataInputForm from './components/DataInputForm'
 import GrowthCharts from './components/GrowthCharts'
 import BoxWhiskerPlots from './components/BoxWhiskerPlots'
 
+// Generate a unique ID for a person based on name and DOB
+const getPersonId = (name, birthDate) => {
+  return `${name || 'Unnamed'}_${birthDate || 'NoDOB'}_${Date.now()}`
+}
+
+// Get person key from name and DOB (for matching existing people)
+const getPersonKey = (name, birthDate) => {
+  return `${(name || '').trim()}_${birthDate || ''}`
+}
+
 function App() {
-  const [patientData, setPatientData] = useState({
-    name: '',
-    gender: '',
-    birthDate: '',
-    measurement: null
+  const [people, setPeople] = useState(() => {
+    const saved = localStorage.getItem('growthChartPeople')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        // Migrate old format to new format
+        if (parsed.name || parsed.gender || parsed.birthDate || parsed.measurements) {
+          // Old single-person format - convert to new format
+          const personKey = getPersonKey(parsed.name, parsed.birthDate)
+          const migratedPeople = {
+            [personKey]: {
+              id: getPersonId(parsed.name, parsed.birthDate),
+              name: parsed.name || '',
+              gender: parsed.gender || '',
+              birthDate: parsed.birthDate || '',
+              measurements: parsed.measurements || (parsed.measurement ? [parsed.measurement] : [])
+            }
+          }
+          return migratedPeople
+        }
+        return parsed
+      } catch (e) {
+        console.error('Error loading saved people:', e)
+      }
+    }
+    return {}
+  })
+
+  const [selectedPersonId, setSelectedPersonId] = useState(() => {
+    const saved = localStorage.getItem('growthChartSelectedPerson')
+    return saved || null
+  })
+
+  const [patientData, setPatientData] = useState(() => {
+    if (selectedPersonId && people[selectedPersonId]) {
+      return people[selectedPersonId]
+    }
+    return {
+      name: '',
+      gender: '',
+      birthDate: '',
+      measurements: []
+    }
   })
 
   const [referenceSources, setReferenceSources] = useState(() => {
@@ -26,52 +74,321 @@ function App() {
     return { age: 'who', wfh: 'who' }
   })
 
+  // Update patientData when selectedPersonId or people change
   useEffect(() => {
-    const saved = localStorage.getItem('growthChartData')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        if (parsed.measurements && parsed.measurements.length > 0) {
-          parsed.measurement = parsed.measurements[parsed.measurements.length - 1]
-          delete parsed.measurements
-        }
-        setPatientData(parsed)
-      } catch (e) {
-        console.error('Error loading saved data:', e)
-      }
+    if (selectedPersonId && people[selectedPersonId]) {
+      setPatientData(people[selectedPersonId])
+    } else if (!selectedPersonId) {
+      setPatientData({
+        name: '',
+        gender: '',
+        birthDate: '',
+        measurements: []
+      })
     }
-  }, [])
+  }, [selectedPersonId, people])
 
+  // Save people to localStorage whenever they change
   useEffect(() => {
-    if (patientData.measurement || patientData.name || patientData.gender || patientData.birthDate) {
-      localStorage.setItem('growthChartData', JSON.stringify(patientData))
+    if (Object.keys(people).length > 0) {
+      localStorage.setItem('growthChartPeople', JSON.stringify(people))
     }
-  }, [patientData])
+  }, [people])
+
+  // Save selected person ID
+  useEffect(() => {
+    if (selectedPersonId) {
+      localStorage.setItem('growthChartSelectedPerson', selectedPersonId)
+    } else {
+      localStorage.removeItem('growthChartSelectedPerson')
+    }
+  }, [selectedPersonId])
 
   useEffect(() => {
     localStorage.setItem('growthChartSources', JSON.stringify(referenceSources))
   }, [referenceSources])
 
-  const handleDataUpdate = (newData) => {
-    setPatientData(newData)
+  const handleAddPerson = (name, birthDate, gender) => {
+    const personKey = getPersonKey(name, birthDate)
+    
+    // Check if person already exists
+    if (people[personKey]) {
+      // Person exists, select them
+      setSelectedPersonId(personKey)
+      return personKey
+    }
+
+    // Create new person
+    const newPerson = {
+      id: getPersonId(name, birthDate),
+      name: name || '',
+      gender: gender || '',
+      birthDate: birthDate || '',
+      measurements: []
+    }
+
+    setPeople(prev => ({
+      ...prev,
+      [personKey]: newPerson
+    }))
+
+    setSelectedPersonId(personKey)
+    return personKey
   }
 
-  const handleUpdateMeasurement = (measurement) => {
-    setPatientData(prev => ({
-      ...prev,
-      measurement
-    }))
+  const handleSelectPerson = (personId) => {
+    setSelectedPersonId(personId)
+  }
+
+  const handleDeletePerson = (personId) => {
+    if (confirm('Are you sure you want to delete this person and all their measurements?')) {
+      setPeople(prev => {
+        const updated = { ...prev }
+        delete updated[personId]
+        return updated
+      })
+      if (selectedPersonId === personId) {
+        setSelectedPersonId(null)
+      }
+    }
+  }
+
+  const handleDataUpdate = (newData) => {
+    if (!selectedPersonId) return
+    
+    const personKey = getPersonKey(newData.name, newData.birthDate)
+    
+    // If name or DOB changed, we might need to update the key
+    if (personKey !== selectedPersonId && people[personKey]) {
+      // Person with this name/DOB already exists - merge measurements
+      const existing = people[personKey]
+      const mergedMeasurements = [...(existing.measurements || []), ...(newData.measurements || [])]
+      mergedMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      
+      setPeople(prev => ({
+        ...prev,
+        [personKey]: {
+          ...existing,
+          ...newData,
+          measurements: mergedMeasurements
+        }
+      }))
+      
+      // Remove old entry if key changed
+      if (selectedPersonId !== personKey) {
+        setPeople(prev => {
+          const updated = { ...prev }
+          delete updated[selectedPersonId]
+          return updated
+        })
+      }
+      
+      setSelectedPersonId(personKey)
+    } else {
+      // Update existing person
+      setPeople(prev => ({
+        ...prev,
+        [selectedPersonId]: {
+          ...prev[selectedPersonId],
+          ...newData
+        }
+      }))
+    }
+  }
+
+  const handleAddMeasurement = (measurement) => {
+    if (!selectedPersonId) return
+    
+    setPeople(prev => {
+      const person = prev[selectedPersonId]
+      if (!person) return prev
+      
+      const existingMeasurements = person.measurements || []
+      
+      // Check for duplicate date
+      const existingIndex = existingMeasurements.findIndex(
+        m => m.date === measurement.date
+      )
+      
+      if (existingIndex >= 0) {
+        // Same date - merge measurements
+        const existing = existingMeasurements[existingIndex]
+        const conflicts = []
+        
+        // Check for conflicts (same field but different values)
+        const fields = ['height', 'weight', 'headCircumference', 'armCircumference', 'subscapularSkinfold', 'tricepsSkinfold']
+        fields.forEach(field => {
+          const existingVal = existing[field]
+          const newVal = measurement[field]
+          
+          if (existingVal != null && newVal != null && existingVal !== newVal) {
+            conflicts.push({
+              field,
+              existing: existingVal,
+              new: newVal
+            })
+          }
+        })
+        
+        if (conflicts.length > 0) {
+          // Show error with conflict details
+          const conflictMsg = conflicts.map(c => 
+            `${c.field}: existing=${c.existing}, new=${c.new}`
+          ).join('\n')
+          alert(`Cannot merge measurements: conflicting values for the same date:\n${conflictMsg}\n\nPlease edit the existing measurement instead.`)
+          return prev
+        }
+        
+        // Merge measurements (new values override nulls, but don't override existing non-null values)
+        const merged = { ...existing }
+        fields.forEach(field => {
+          if (merged[field] == null && measurement[field] != null) {
+            merged[field] = measurement[field]
+          }
+        })
+        // Update age if provided
+        if (measurement.ageYears != null) merged.ageYears = measurement.ageYears
+        if (measurement.ageMonths != null) merged.ageMonths = measurement.ageMonths
+        
+        const newMeasurements = [...existingMeasurements]
+        newMeasurements[existingIndex] = merged
+        
+        return {
+          ...prev,
+          [selectedPersonId]: {
+            ...person,
+            measurements: newMeasurements
+          }
+        }
+      }
+      
+      // New measurement - add it
+      const newMeasurements = [...existingMeasurements, measurement]
+      // Sort by date
+      newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      
+      return {
+        ...prev,
+        [selectedPersonId]: {
+          ...person,
+          measurements: newMeasurements
+        }
+      }
+    })
+  }
+
+  const handleUpdateMeasurement = (index, measurement) => {
+    if (!selectedPersonId) return
+    
+    setPeople(prev => {
+      const person = prev[selectedPersonId]
+      if (!person) return prev
+      
+      const existingMeasurements = person.measurements || []
+      
+      // Check for duplicate date (excluding current index)
+      const duplicateIndex = existingMeasurements.findIndex(
+        (m, i) => i !== index && m.date === measurement.date
+      )
+      
+      if (duplicateIndex >= 0) {
+        // Same date exists - check for conflicts
+        const existing = existingMeasurements[duplicateIndex]
+        const conflicts = []
+        
+        const fields = ['height', 'weight', 'headCircumference', 'armCircumference', 'subscapularSkinfold', 'tricepsSkinfold']
+        fields.forEach(field => {
+          const existingVal = existing[field]
+          const newVal = measurement[field]
+          
+          if (existingVal != null && newVal != null && existingVal !== newVal) {
+            conflicts.push({
+              field,
+              existing: existingVal,
+              new: newVal
+            })
+          }
+        })
+        
+        if (conflicts.length > 0) {
+          const conflictMsg = conflicts.map(c => 
+            `${c.field}: existing=${c.existing}, new=${c.new}`
+          ).join('\n')
+          alert(`Cannot update: conflicting values for the same date:\n${conflictMsg}\n\nPlease use a different date or merge with the existing measurement.`)
+          return prev
+        }
+        
+        // Merge with existing measurement at duplicate index
+        const merged = { ...existing }
+        fields.forEach(field => {
+          if (merged[field] == null && measurement[field] != null) {
+            merged[field] = measurement[field]
+          }
+        })
+        if (measurement.ageYears != null) merged.ageYears = measurement.ageYears
+        if (measurement.ageMonths != null) merged.ageMonths = measurement.ageMonths
+        
+        // Remove the current index and update the duplicate index
+        const newMeasurements = existingMeasurements.filter((_, i) => i !== index)
+        newMeasurements[duplicateIndex > index ? duplicateIndex - 1 : duplicateIndex] = merged
+        newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+        
+        return {
+          ...prev,
+          [selectedPersonId]: {
+            ...person,
+            measurements: newMeasurements
+          }
+        }
+      }
+      
+      // No duplicate - update normally
+      const newMeasurements = [...existingMeasurements]
+      newMeasurements[index] = measurement
+      // Sort by date
+      newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      
+      return {
+        ...prev,
+        [selectedPersonId]: {
+          ...person,
+          measurements: newMeasurements
+        }
+      }
+    })
+  }
+
+  const handleDeleteMeasurement = (index) => {
+    if (!selectedPersonId) return
+    
+    setPeople(prev => {
+      const person = prev[selectedPersonId]
+      if (!person) return prev
+      
+      const newMeasurements = [...(person.measurements || [])]
+      newMeasurements.splice(index, 1)
+      
+      return {
+        ...prev,
+        [selectedPersonId]: {
+          ...person,
+          measurements: newMeasurements
+        }
+      }
+    })
   }
 
   const handleClearData = () => {
-    if (confirm('Are you sure you want to clear all data?')) {
-      setPatientData({
-        name: '',
-        gender: '',
-        birthDate: '',
-        measurement: null
-      })
-      localStorage.removeItem('growthChartData')
+    if (!selectedPersonId) return
+    
+    if (confirm('Are you sure you want to clear all measurements for this person?')) {
+      setPeople(prev => ({
+        ...prev,
+        [selectedPersonId]: {
+          ...prev[selectedPersonId],
+          measurements: []
+        }
+      }))
     }
   }
 
@@ -99,8 +416,15 @@ function App() {
           <section className="input-section">
             <DataInputForm
               patientData={patientData}
+              people={people}
+              selectedPersonId={selectedPersonId}
               onDataUpdate={handleDataUpdate}
+              onAddPerson={handleAddPerson}
+              onSelectPerson={handleSelectPerson}
+              onDeletePerson={handleDeletePerson}
+              onAddMeasurement={handleAddMeasurement}
               onUpdateMeasurement={handleUpdateMeasurement}
+              onDeleteMeasurement={handleDeleteMeasurement}
               onClearData={handleClearData}
               referenceSources={referenceSources}
               onReferenceSourcesChange={setReferenceSources}
@@ -108,7 +432,7 @@ function App() {
           </section>
 
           <section className="charts-section">
-            {patientData.measurement && patientData.gender && (
+            {patientData.measurements && patientData.measurements.length > 0 && patientData.gender && (
               <>
                 <GrowthCharts
                   patientData={patientData}

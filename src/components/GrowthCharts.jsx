@@ -270,14 +270,15 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const [bmifaData, setBmifaData] = useState(null)
   const [weightHeightData, setWeightHeightData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [isRendering, setIsRendering] = useState(true)
 
   useEffect(() => {
-    if (patientData.gender && patientData.measurement) {
+    if (patientData.gender && patientData.measurements && patientData.measurements.length > 0) {
       loadReferenceData()
     } else {
       setLoading(false)
     }
-  }, [patientData.gender, patientData.measurement, referenceSources?.age])
+  }, [patientData.gender, patientData.measurements, referenceSources?.age])
 
       const loadReferenceData = async () => {
     setLoading(true)
@@ -537,12 +538,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
   }
 
-  const prepareChartData = useCallback((data, patientValue, valueKey) => {
-    if (!data || !patientData.measurement) return []
+  const prepareChartData = useCallback((data, measurements, valueKey, getValue) => {
+    if (!data || !measurements || measurements.length === 0) return []
     
-    const measurement = patientData.measurement
-    const patientAge = measurement.ageYears
-    
+    // Start with reference data
     const chartData = data.map(ref => ({
       ageYears: ref.ageYears,
       ageLabel: formatAgeLabel(ref.ageYears),
@@ -550,55 +549,156 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       [valueKey]: null
     }))
     
-    const closestIndex = chartData.reduce((closest, item, index) => {
-      if (closest === -1) return index
-      const closestDiff = Math.abs(chartData[closest].ageYears - patientAge)
-      const currentDiff = Math.abs(item.ageYears - patientAge)
-      return currentDiff < closestDiff ? index : closest
-    }, -1)
+    // Create patient measurement points
+    const patientPoints = []
+    measurements.forEach(measurement => {
+      const patientAge = measurement.ageYears
+      const patientValue = getValue(measurement)
+      
+      if (patientValue == null || patientAge == null) return
+      
+      // Find closest reference point to get reference data
+      const closestRef = chartData.reduce((closest, item) => {
+        if (!closest) return item
+        const closestDiff = Math.abs(closest.ageYears - patientAge)
+        const currentDiff = Math.abs(item.ageYears - patientAge)
+        return currentDiff < closestDiff ? item : closest
+      }, null)
+      
+      if (closestRef) {
+        // Create a new point with reference data but patient age and value
+        const newPoint = {
+          ...closestRef,
+          ageYears: patientAge,
+          ageLabel: formatAgeLabel(patientAge),
+          [valueKey]: patientValue
+        }
+        patientPoints.push(newPoint)
+      }
+    })
     
-    if (closestIndex >= 0 && patientValue != null) {
-      chartData[closestIndex][valueKey] = patientValue
-    }
+    // Merge patient points into chart data
+    // Always update the closest reference point instead of inserting new ones
+    // This prevents duplicate x-axis values
+    patientPoints.forEach(patientPoint => {
+      const patientAge = patientPoint.ageYears
+      
+      // Find the closest reference point
+      let closestIndex = -1
+      let closestDiff = Infinity
+      
+      chartData.forEach((item, index) => {
+        const diff = Math.abs(item.ageYears - patientAge)
+        if (diff < closestDiff) {
+          closestDiff = diff
+          closestIndex = index
+        }
+      })
+      
+      if (closestIndex >= 0) {
+        // Update the closest reference point with patient value
+        // Keep the reference point's age to avoid x-axis duplicates
+        // If multiple patient points map to same reference, use the latest one
+        if (chartData[closestIndex][valueKey] == null || 
+            Math.abs(chartData[closestIndex].ageYears - patientAge) <= Math.abs(chartData[closestIndex].ageYears - (chartData[closestIndex]._patientAge || Infinity))) {
+          chartData[closestIndex][valueKey] = patientPoint[valueKey]
+          chartData[closestIndex]._patientAge = patientAge // Store original patient age for comparison
+        }
+      }
+    })
     
-    return chartData
-  }, [patientData.measurement])
+    // Remove the temporary _patientAge property
+    chartData.forEach(item => delete item._patientAge)
+    
+    // Sort by age to ensure proper line connection
+    chartData.sort((a, b) => a.ageYears - b.ageYears)
+    
+    // Remove any duplicate age points (within 0.1 years) - keep the one with patient data if available
+    // This prevents duplicate x-axis labels
+    const deduplicated = []
+    const seenAges = new Set()
+    
+    chartData.forEach(item => {
+      // Round age to 2 decimal places for comparison
+      const roundedAge = Math.round(item.ageYears * 100) / 100
+      
+      if (!seenAges.has(roundedAge)) {
+        seenAges.add(roundedAge)
+        deduplicated.push(item)
+      } else {
+        // Merge with existing point - keep patient value if this item has one
+        const existing = deduplicated.find(d => Math.round(d.ageYears * 100) / 100 === roundedAge)
+        if (existing && item[valueKey] != null && existing[valueKey] == null) {
+          existing[valueKey] = item[valueKey]
+        }
+      }
+    })
+    
+    return deduplicated
+  }, [])
 
   const prepareWeightHeightData = useCallback(() => {
-    if (!weightHeightData || !patientData.measurement || !patientData.measurement.height) return []
-    
-    const measurement = patientData.measurement
+    if (!weightHeightData || !patientData.measurements || patientData.measurements.length === 0) return []
     
     const chartData = weightHeightData.map(ref => ({
       ...ref,
       patientWeight: null
     }))
     
-    const patientHeight = measurement.height
-    const closestIndex = chartData.reduce((closest, item, index) => {
-      if (closest === -1) return index
-      const closestDiff = Math.abs(chartData[closest].height - patientHeight)
-      const currentDiff = Math.abs(item.height - patientHeight)
-      return currentDiff < closestDiff ? index : closest
-    }, -1)
+    // Add all measurement points
+    patientData.measurements.forEach(measurement => {
+      if (!measurement.height || !measurement.weight) return
+      
+      const patientHeight = measurement.height
+      
+      // Find the closest reference point
+      let closestIndex = -1
+      let closestDiff = Infinity
+      
+      chartData.forEach((item, index) => {
+        const diff = Math.abs(item.height - patientHeight)
+        if (diff < closestDiff) {
+          closestDiff = diff
+          closestIndex = index
+        }
+      })
+      
+      if (closestIndex >= 0) {
+        // Always update the closest point instead of creating new ones
+        // This prevents duplicate x-axis values
+        chartData[closestIndex].patientWeight = measurement.weight
+      }
+    })
     
-    if (closestIndex >= 0) {
-      chartData[closestIndex].patientWeight = measurement.weight
-    }
+    // Sort by height
+    chartData.sort((a, b) => a.height - b.height)
     
-    return chartData
-  }, [weightHeightData, patientData.measurement])
+    // Remove duplicate height points (within 0.5 cm) - keep the one with patient data if available
+    const deduplicated = []
+    chartData.forEach(item => {
+      const existing = deduplicated.find(d => Math.abs(d.height - item.height) < 0.5)
+      if (existing) {
+        // Merge: keep patient value if this item has one
+        if (item.patientWeight != null && existing.patientWeight == null) {
+          existing.patientWeight = item.patientWeight
+        }
+      } else {
+        deduplicated.push(item)
+      }
+    })
+    
+    return deduplicated
+  }, [weightHeightData, patientData.measurements])
 
-  const getClosestRefByAge = useCallback((data) => {
-    if (!data || !patientData.measurement) return null
-    const patientAge = patientData.measurement.ageYears
+  const getClosestRefByAge = useCallback((data, ageYears) => {
+    if (!data || ageYears == null) return null
     return data.reduce((closest, item) => {
       if (!closest) return item
-      const closestDiff = Math.abs(closest.ageYears - patientAge)
-      const currentDiff = Math.abs(item.ageYears - patientAge)
+      const closestDiff = Math.abs(closest.ageYears - ageYears)
+      const currentDiff = Math.abs(item.ageYears - ageYears)
       return currentDiff < closestDiff ? item : closest
     }, null)
-  }, [patientData.measurement])
+  }, [])
 
   const calculateBMI = useCallback((weight, height) => {
     if (!weight || !height || height <= 0) return null
@@ -606,8 +706,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return weight / (heightM * heightM)
   }, [])
 
-  const getPatientPercentile = useCallback((value, type) => {
-    if (!value || !patientData.measurement) return null
+  const getPatientPercentile = useCallback((value, ageYears, type) => {
+    if (!value || ageYears == null) return null
 
     const sourceData =
       type === 'weight'
@@ -626,7 +726,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         ? tsfaData
         : null
 
-    const closestRef = getClosestRefByAge(sourceData)
+    const closestRef = getClosestRefByAge(sourceData, ageYears)
 
     if (!closestRef) return null
 
@@ -692,7 +792,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         closestRef.tsfaP3, closestRef.tsfaP15, closestRef.tsfaP50, closestRef.tsfaP85, closestRef.tsfaP97)
     }
     return null
-  }, [wfaData, hfaData, hcfaData, bmifaData, acfaData, ssfaData, tsfaData, getClosestRefByAge, patientData.measurement])
+  }, [wfaData, hfaData, hcfaData, bmifaData, acfaData, ssfaData, tsfaData, getClosestRefByAge])
 
   const getWeightForHeightPercentile = useCallback((weight, height) => {
     if (!weight || !height || !weightHeightData) return null
@@ -742,44 +842,26 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   // All hooks must be called before any early returns
   const getSourceLabel = useCallback((source) => (source === 'cdc' ? 'CDC' : 'WHO'), [])
 
-  const calculateAgeDomain = useCallback((patientAge) => {
-    if (!patientAge) return [0, 1]
-    let minAge = 0
-    let maxAge = 0
+  const calculateAgeDomain = useCallback((measurements) => {
+    if (!measurements || measurements.length === 0) return [0, 1]
     
-    if (patientAge <= 0 || patientAge < 0.25) {
-      // Very young: show from 0 to 0.5 years
-      return [0, 0.5]
-    } else if (patientAge < 1) {
-      // Under 1 year: still show from 0, but limit range
-      maxAge = Math.min(patientAge * 2, 1.5)
-      return [0, maxAge]
-    } else if (patientAge < 2.5) {
-      // 1-2.5 years: show from 50% of age to 2x age
-      minAge = Math.max(0, patientAge * 0.5)
-      maxAge = patientAge * 2
-      const roundedMax = Math.ceil(maxAge * 2) / 2
-      return [minAge, roundedMax]
-    } else if (patientAge < 5) {
-      // 2.5-5 years: show from 60% of age to 1.5x age
-      minAge = Math.max(0, patientAge * 0.6)
-      maxAge = Math.min(patientAge * 1.5, 8)
-      return [minAge, maxAge]
-    } else if (patientAge < 10) {
-      // 5-10 years: show from 70% of age to 1.3x age
-      minAge = Math.max(0, patientAge * 0.7)
-      maxAge = Math.min(patientAge * 1.3, 15)
-      return [minAge, maxAge]
-    } else {
-      // 10+ years: show from 75% of age to 1.2x age
-      minAge = Math.max(0, patientAge * 0.75)
-      maxAge = Math.min(patientAge * 1.2, 20)
-      return [minAge, maxAge]
-    }
+    const ages = measurements.map(m => m.ageYears).filter(a => a != null)
+    if (ages.length === 0) return [0, 1]
+    
+    const minAge = Math.min(...ages)
+    const maxAge = Math.max(...ages)
+    
+    // Add some padding before min for readability, but no padding after max so line reaches edge
+    const range = Math.max(maxAge - minAge, 0.5)
+    const leftPadding = range * 0.1
+    
+    return [
+      Math.max(0, minAge - leftPadding),
+      maxAge  // No padding on the right - line should go to the edge
+    ]
   }, [])
 
-  const measurementAge = patientData.measurement?.ageYears || 0
-  const ageDomain = useMemo(() => calculateAgeDomain(measurementAge), [calculateAgeDomain, measurementAge])
+  const ageDomain = useMemo(() => calculateAgeDomain(patientData.measurements), [calculateAgeDomain, patientData.measurements])
   
   const filterDataByAge = useCallback((data) => {
     if (!data) return []
@@ -797,38 +879,36 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return ['auto', 'auto']
   }, [])
 
-  const patientBMI = useMemo(() => 
-    calculateBMI(patientData.measurement?.weight, patientData.measurement?.height),
-    [calculateBMI, patientData.measurement?.weight, patientData.measurement?.height]
-  )
-
   const wfaChartDataRaw = useMemo(() => 
-    prepareChartData(wfaData, patientData.measurement?.weight, 'patientWeight'),
-    [prepareChartData, wfaData, patientData.measurement?.weight]
+    prepareChartData(wfaData, patientData.measurements, 'patientWeight', m => m.weight),
+    [prepareChartData, wfaData, patientData.measurements]
   )
   const hfaChartDataRaw = useMemo(() => 
-    prepareChartData(hfaData, patientData.measurement?.height, 'patientHeight'),
-    [prepareChartData, hfaData, patientData.measurement?.height]
+    prepareChartData(hfaData, patientData.measurements, 'patientHeight', m => m.height),
+    [prepareChartData, hfaData, patientData.measurements]
   )
   const hcfaChartDataRaw = useMemo(() => 
-    prepareChartData(hcfaData, patientData.measurement?.headCircumference, 'patientHC'),
-    [prepareChartData, hcfaData, patientData.measurement?.headCircumference]
+    prepareChartData(hcfaData, patientData.measurements, 'patientHC', m => m.headCircumference),
+    [prepareChartData, hcfaData, patientData.measurements]
   )
-  const bmifaChartDataRaw = useMemo(() => 
-    prepareChartData(bmifaData, patientBMI, 'patientBMI'),
-    [prepareChartData, bmifaData, patientBMI]
-  )
+  const bmifaChartDataRaw = useMemo(() => {
+    const measurementsWithBMI = patientData.measurements?.map(m => ({
+      ...m,
+      bmi: calculateBMI(m.weight, m.height)
+    })) || []
+    return prepareChartData(bmifaData, measurementsWithBMI, 'patientBMI', m => m.bmi)
+  }, [prepareChartData, bmifaData, patientData.measurements, calculateBMI])
   const acfaChartDataRaw = useMemo(() => 
-    prepareChartData(acfaData, patientData.measurement?.armCircumference, 'patientACFA'),
-    [prepareChartData, acfaData, patientData.measurement?.armCircumference]
+    prepareChartData(acfaData, patientData.measurements, 'patientACFA', m => m.armCircumference),
+    [prepareChartData, acfaData, patientData.measurements]
   )
   const ssfaChartDataRaw = useMemo(() => 
-    prepareChartData(ssfaData, patientData.measurement?.subscapularSkinfold, 'patientSSFA'),
-    [prepareChartData, ssfaData, patientData.measurement?.subscapularSkinfold]
+    prepareChartData(ssfaData, patientData.measurements, 'patientSSFA', m => m.subscapularSkinfold),
+    [prepareChartData, ssfaData, patientData.measurements]
   )
   const tsfaChartDataRaw = useMemo(() => 
-    prepareChartData(tsfaData, patientData.measurement?.tricepsSkinfold, 'patientTSFA'),
-    [prepareChartData, tsfaData, patientData.measurement?.tricepsSkinfold]
+    prepareChartData(tsfaData, patientData.measurements, 'patientTSFA', m => m.tricepsSkinfold),
+    [prepareChartData, tsfaData, patientData.measurements]
   )
   const whChartData = useMemo(() => prepareWeightHeightData(), [prepareWeightHeightData])
   
@@ -850,11 +930,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
 
   // Optimized margins - minimal right margin for labels, maximum space for chart
   const getChartMargins = useCallback(() => {
-    return { top: 5, right: 40, left: 5, bottom: 40 }
+    return { top: 5, right: 5, left: 5, bottom: 40 }
   }, [])
 
-  const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, patientValue, chartData) => {
-    const patientPercentile = getPatientPercentile(patientValue, type)
+  const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, chartData, measurements, getValue) => {
+    // Get the last measurement for percentile display in legend
+    const lastMeasurement = measurements && measurements.length > 0 
+      ? measurements[measurements.length - 1] 
+      : null
+    const lastValue = lastMeasurement ? getValue(lastMeasurement) : null
+    const lastAge = lastMeasurement?.ageYears
+    const patientPercentile = lastValue && lastAge ? getPatientPercentile(lastValue, lastAge, type) : null
     const patientNumeric = getNumericPercentile(patientPercentile)
     
     // Get the last valid index for this data
@@ -863,12 +949,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     
     // Create label component factory that captures line properties
     const createEndLabel = (lineName, lineColor, isPatient = false) => {
-      return ({ x, y, value, index }) => {
+      return ({ x, y, value, index, viewBox }) => {
         // Only show label at the last data point and if value exists
-        if (value == null || value === undefined || index !== lastIndex) return null
+        if (value == null || value === undefined || index !== lastIndex || !viewBox) return null
+        // Position label outside the chart area to the right
+        const labelX = viewBox.x + viewBox.width + 5
         return (
           <text
-            x={x + 5}
+            x={labelX}
             y={y}
             fill={lineColor}
             fontSize="11px"
@@ -882,13 +970,21 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       }
     }
     
-    // Custom label for patient point that shows at the actual point location
-    const PatientPointLabel = ({ x, y, value }) => {
-      // Show label at the patient's point (wherever value exists, not just last point)
-      if (value == null || value === undefined || !patientPercentile) return null
+    // Custom label for patient point that shows at the actual point location (only for last point)
+    const PatientPointLabel = ({ x, y, value, index, viewBox }) => {
+      // Only show label on the last data point with a value
+      const dataLength = chartData?.length || 0
+      const lastIndexWithValue = chartData ? 
+        chartData.map((d, i) => ({ value: d[patientDataKey], index: i }))
+          .filter(d => d.value != null)
+          .pop()?.index : -1
+      
+      if (value == null || value === undefined || index !== lastIndexWithValue || !patientPercentile || !viewBox) return null
+      // Position label outside the chart area to the right
+      const labelX = viewBox.x + viewBox.width + 5
       return (
         <text
-          x={x + 10}
+          x={labelX}
           y={y}
           fill="#000"
           fontSize="11px"
@@ -908,10 +1004,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         dataKey={patientDataKey} 
         stroke="#000" 
         strokeWidth={3} 
-        dot={{ r: 8, fill: '#000', stroke: '#fff', strokeWidth: 2 }}
-        activeDot={false}
-        name={patientPercentile || ''}
-        connectNulls={false}
+        dot={{ r: 6, fill: '#000', stroke: '#fff', strokeWidth: 2 }}
+        activeDot={{ r: 8 }}
+        name={patientPercentile || 'Patient'}
+        connectNulls={true}
+        isAnimationActive={false}
       >
         <LabelList content={<PatientPointLabel />} />
       </Line>
@@ -920,25 +1017,25 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th">
+        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false}>
           <LabelList content={createEndLabel('97th', '#ff6b6b')} position="right" />
         </Line>,
-        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th">
+        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" isAnimationActive={false}>
           <LabelList content={createEndLabel('85th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th">
+        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" isAnimationActive={false}>
           <LabelList content={createEndLabel('75th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th">
+        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" isAnimationActive={false}>
           <LabelList content={createEndLabel('50th', '#4ecdc4')} position="right" />
         </Line>,
-        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th">
+        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" isAnimationActive={false}>
           <LabelList content={createEndLabel('25th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th">
+        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" isAnimationActive={false}>
           <LabelList content={createEndLabel('15th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd">
+        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" isAnimationActive={false}>
           <LabelList content={createEndLabel('3rd', '#ff6b6b')} position="right" />
         </Line>,
       ]
@@ -977,8 +1074,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return renderAllPercentiles(insertAt)
   }, [getPatientPercentile, getNumericPercentile])
 
-  const renderWeightForHeightLines = useCallback((patientWeight, patientHeight, chartData) => {
-    const patientPercentile = getWeightForHeightPercentile(patientWeight, patientHeight)
+  const renderWeightForHeightLines = useCallback((chartData, measurements) => {
+    // Get the last measurement for percentile display
+    const lastMeasurement = measurements && measurements.length > 0 
+      ? measurements[measurements.length - 1] 
+      : null
+    const lastWeight = lastMeasurement?.weight
+    const lastHeight = lastMeasurement?.height
+    const patientPercentile = lastWeight && lastHeight ? getWeightForHeightPercentile(lastWeight, lastHeight) : null
     const patientNumeric = getNumericPercentile(patientPercentile)
     
     // Get the last valid index for this data
@@ -987,12 +1090,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     
     // Create label component factory that captures line properties
     const createEndLabel = (lineName, lineColor, isPatient = false) => {
-      return ({ x, y, value, index }) => {
+      return ({ x, y, value, index, viewBox }) => {
         // Only show label at the last data point and if value exists
-        if (value == null || value === undefined || index !== lastIndex) return null
+        if (value == null || value === undefined || index !== lastIndex || !viewBox) return null
+        // Position label outside the chart area to the right
+        const labelX = viewBox.x + viewBox.width + 5
         return (
           <text
-            x={x + 5}
+            x={labelX}
             y={y}
             fill={lineColor}
             fontSize="11px"
@@ -1006,13 +1111,21 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       }
     }
     
-    // Custom label for patient point that shows at the actual point location
-    const PatientPointLabel = ({ x, y, value }) => {
-      // Show label at the patient's point (wherever value exists, not just last point)
-      if (value == null || value === undefined || !patientPercentile) return null
+    // Custom label for patient point that shows at the actual point location (only for last point)
+    const PatientPointLabel = ({ x, y, value, index, viewBox }) => {
+      // Only show label on the last data point with a value
+      const dataLength = chartData?.length || 0
+      const lastIndexWithValue = chartData ? 
+        chartData.map((d, i) => ({ value: d.patientWeight, index: i }))
+          .filter(d => d.value != null)
+          .pop()?.index : -1
+      
+      if (value == null || value === undefined || index !== lastIndexWithValue || !patientPercentile || !viewBox) return null
+      // Position label outside the chart area to the right
+      const labelX = viewBox.x + viewBox.width + 5
       return (
         <text
-          x={x + 10}
+          x={labelX}
           y={y}
           fill="#000"
           fontSize="11px"
@@ -1032,10 +1145,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         dataKey="patientWeight" 
         stroke="#000" 
         strokeWidth={3} 
-        dot={{ r: 8, fill: '#000', stroke: '#fff', strokeWidth: 2 }}
-        activeDot={false}
-        name={patientPercentile || ''}
-        connectNulls={false}
+        dot={{ r: 6, fill: '#000', stroke: '#fff', strokeWidth: 2 }}
+        activeDot={{ r: 8 }}
+        name={patientPercentile || 'Patient'}
+        connectNulls={true}
+        isAnimationActive={false}
       >
         <LabelList content={<PatientPointLabel />} />
       </Line>
@@ -1044,25 +1158,25 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th">
+        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false}>
           <LabelList content={createEndLabel('97th', '#ff6b6b')} position="right" />
         </Line>,
-        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th">
+        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" isAnimationActive={false}>
           <LabelList content={createEndLabel('85th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th">
+        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" isAnimationActive={false}>
           <LabelList content={createEndLabel('75th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th">
+        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" isAnimationActive={false}>
           <LabelList content={createEndLabel('50th', '#4ecdc4')} position="right" />
         </Line>,
-        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th">
+        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" isAnimationActive={false}>
           <LabelList content={createEndLabel('25th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th">
+        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" isAnimationActive={false}>
           <LabelList content={createEndLabel('15th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd">
+        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" isAnimationActive={false}>
           <LabelList content={createEndLabel('3rd', '#ff6b6b')} position="right" />
         </Line>,
       ]
@@ -1099,15 +1213,30 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     return renderAllPercentiles(insertAt)
-  }, [getWeightForHeightPercentile, getNumericPercentile])
+  }, [getWeightForHeightPercentile, getNumericPercentile, patientData.measurements])
+
+  // Handle rendering state - show spinner while charts are being prepared
+  useEffect(() => {
+    if (!loading && patientData.gender && patientData.measurements && patientData.measurements.length > 0 && (wfaData || hfaData || hcfaData)) {
+      // Small delay to allow React to render, then hide spinner
+      const timer = setTimeout(() => {
+        setIsRendering(false)
+      }, 150)
+      return () => clearTimeout(timer)
+    } else {
+      setIsRendering(true)
+    }
+  }, [loading, patientData.gender, patientData.measurements, wfaData, hfaData, hcfaData])
 
   // Early returns after all hooks
   if (loading) return <div className="loading">Loading reference data...</div>
   if (!patientData.gender) return <div className="no-data">Please select gender to view growth charts</div>
-  if (!patientData.measurement) return <div className="no-data">Please add a measurement to view growth charts</div>
+  if (!patientData.measurements || !Array.isArray(patientData.measurements) || patientData.measurements.length === 0) return <div className="no-data">Please add a measurement to view growth charts</div>
   if (!wfaData && !hfaData && !hcfaData) return <div className="no-data">No reference data available</div>
 
-  const ageLabel = measurementAge < 2 ? 'Age (Months)' : 'Age (Years)'
+  // Determine age label based on max age in measurements
+  const maxAge = patientData.measurements.reduce((max, m) => Math.max(max, m.ageYears || 0), 0)
+  const ageLabel = maxAge < 2 ? 'Age (Months)' : 'Age (Years)'
 
   return (
     <div className="growth-charts">
@@ -1118,14 +1247,18 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <h3 className="section-header">Age-based Charts</h3>
         
         {/* 1. Weight-for-Age */}
-      {patientData.measurement.weight && (
+      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.weight) && (
         <div className="chart-container">
           <h3>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          {isRendering ? (
+            <div className="chart-spinner-container">
+              <div className="spinner"></div>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height={400}>
             <LineChart 
               data={wfaChartData || []} 
               margin={getChartMargins()}
-              syncId="growth-charts"
               isAnimationActive={false}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1136,22 +1269,31 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={ageDomain}
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
+                allowDuplicatedCategory={false}
+                allowDataOverflow={false}
+                padding={{ left: 0, right: 0 }}
               />
               <YAxis 
-                domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], patientData.measurement.weight)}
+                domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], null)}
                 label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('weight', 'weight', 'patientWeight', patientData.measurement.weight, wfaChartData)}
+              {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData.measurements, m => m.weight)}
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
       )}
 
       {/* 2. Height-for-Age */}
-      {patientData.measurement.height && (
+      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.height) && (
         <div className="chart-container">
           <h3>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          {isRendering ? (
+            <div className="chart-spinner-container">
+              <div className="spinner"></div>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={hfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1162,22 +1304,31 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={ageDomain}
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
+                allowDuplicatedCategory={false}
+                allowDataOverflow={false}
+                padding={{ left: 0, right: 0 }}
               />
               <YAxis 
-                domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], patientData.measurement.height)}
+                domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], null)}
                 label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} 
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('height', 'height', 'patientHeight', patientData.measurement.height, hfaChartData)}
+              {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData.measurements, m => m.height)}
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
       )}
 
       {/* 4. Head Circumference-for-Age */}
-      {patientData.measurement.headCircumference && (hcfaData?.[0]?.hcP50 != null) && (
+      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.headCircumference) && (hcfaData?.[0]?.hcP50 != null) && (
         <div className="chart-container">
           <h3>Head Circumference-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          {isRendering ? (
+            <div className="chart-spinner-container">
+              <div className="spinner"></div>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={hcfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1188,22 +1339,31 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={ageDomain}
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
+                allowDuplicatedCategory={false}
+                allowDataOverflow={false}
+                padding={{ left: 0, right: 0 }}
               />
               <YAxis 
-                domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], patientData.measurement.headCircumference)}
+                domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], null)}
                 label={{ value: 'Head Circumference (cm)', angle: -90, position: 'insideLeft' }} 
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('hc', 'hc', 'patientHC', patientData.measurement.headCircumference, hcfaChartData)}
+              {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData.measurements, m => m.headCircumference)}
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
       )}
 
       {/* 5. BMI-for-Age (WHO only) */}
-      {referenceSources?.age === 'who' && patientBMI != null && bmifaData && bmifaData.length > 0 && (
+      {referenceSources?.age === 'who' && patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.weight && m.height) && bmifaData && bmifaData.length > 0 && (
         <div className="chart-container">
           <h3>BMI-for-Age <span className="chart-source">(WHO)</span></h3>
+          {isRendering ? (
+            <div className="chart-spinner-container">
+              <div className="spinner"></div>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={bmifaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1214,31 +1374,39 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 domain={ageDomain}
                 tickFormatter={formatAgeTick}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
+                allowDuplicatedCategory={false}
+                allowDataOverflow={false}
+                padding={{ left: 0, right: 0 }}
               />
               <YAxis 
-                domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], patientBMI)}
+                domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], null)}
                 label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} 
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('bmi', 'bmi', 'patientBMI', patientBMI, bmifaChartData)}
+              {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi)}
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
       )}
       </div>
 
       {/* Advanced Anthropometry (WHO only) */}
       {referenceSources?.age === 'who' &&
-        (patientData.measurement.armCircumference ||
-          patientData.measurement.subscapularSkinfold ||
-          patientData.measurement.tricepsSkinfold) && (
+        patientData.measurements && Array.isArray(patientData.measurements) &&
+        patientData.measurements.some(m => m && (m.armCircumference || m.subscapularSkinfold || m.tricepsSkinfold)) && (
         <div className="chart-section">
           <h3 className="section-header">Advanced (WHO Reference)</h3>
 
           {/* Arm Circumference-for-Age */}
-          {patientData.measurement.armCircumference && acfaData && acfaData.length > 0 && (
+          {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.armCircumference) && acfaData && acfaData.length > 0 && (
             <div className="chart-container">
               <h3>Mid-Upper Arm Circumference-for-Age <span className="chart-source">(WHO)</span></h3>
+              {isRendering ? (
+                <div className="chart-spinner-container">
+                  <div className="spinner"></div>
+                </div>
+              ) : (
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={acfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1251,26 +1419,26 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
-                    domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], patientData.measurement.armCircumference)}
+                    domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], null)}
                     label={{ value: 'Arm Circumference (cm)', angle: -90, position: 'insideLeft' }} 
                   />
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                    content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-                  />
-                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', patientData.measurement.armCircumference, acfaChartData)}
+                  {/* Legend removed - labels now appear at end of lines */}
+                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData.measurements, m => m.armCircumference)}
                 </LineChart>
               </ResponsiveContainer>
+              )}
             </div>
           )}
 
           {/* Subscapular Skinfold-for-Age */}
-          {patientData.measurement.subscapularSkinfold && ssfaData && ssfaData.length > 0 && (
+          {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.subscapularSkinfold) && ssfaData && ssfaData.length > 0 && (
             <div className="chart-container">
               <h3>Subscapular Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
+              {isRendering ? (
+                <div className="chart-spinner-container">
+                  <div className="spinner"></div>
+                </div>
+              ) : (
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={ssfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1283,26 +1451,26 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
-                    domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], patientData.measurement.subscapularSkinfold)}
+                    domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], null)}
                     label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
                   />
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                    content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-                  />
-                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', patientData.measurement.subscapularSkinfold, ssfaChartData)}
+                  {/* Legend removed - labels now appear at end of lines */}
+                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData.measurements, m => m.subscapularSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
+              )}
             </div>
           )}
 
           {/* Triceps Skinfold-for-Age */}
-          {patientData.measurement.tricepsSkinfold && tsfaData && tsfaData.length > 0 && (
+          {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.tricepsSkinfold) && tsfaData && tsfaData.length > 0 && (
             <div className="chart-container">
               <h3>Triceps Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
+              {isRendering ? (
+                <div className="chart-spinner-container">
+                  <div className="spinner"></div>
+                </div>
+              ) : (
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={tsfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1315,31 +1483,31 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
-                    domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], patientData.measurement.tricepsSkinfold)}
+                    domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], null)}
                     label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
                   />
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    wrapperStyle={{ paddingLeft: '5px', paddingRight: '0' }}
-                    content={<OrderedLegend percentiles={['97th', '85th', '75th', '50th', '25th', '15th', '3rd']} />}
-                  />
-                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', patientData.measurement.tricepsSkinfold, tsfaChartData)}
+                  {/* Legend removed - labels now appear at end of lines */}
+                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData.measurements, m => m.tricepsSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
+              )}
             </div>
           )}
         </div>
       )}
 
       {/* Weight-for-Height Section */}
-      {patientData.measurement.height && patientData.measurement.weight && whChartData.length > 0 && (
+      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.height && m.weight) && whChartData.length > 0 && (
         <div className="chart-section">
           <h3 className="section-header">Weight-for-Height</h3>
           
           <div className="chart-container">
             <h3>Weight-for-Height <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+            {isRendering ? (
+              <div className="chart-spinner-container">
+                <div className="spinner"></div>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={400}>
               <LineChart data={whChartData} margin={getChartMargins()} isAnimationActive={false}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1349,15 +1517,18 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   scale="linear"
                   domain={['dataMin', 'dataMax']}
                   label={{ value: 'Height (cm)', position: 'insideBottom', offset: -10 }}
+                  allowDataOverflow={false}
+                  padding={{ left: 0, right: 0 }}
                 />
                 <YAxis
-                  domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], patientData.measurement.weight)}
+                  domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], null)}
                   label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }}
                 />
                 {/* Legend removed - labels now appear at end of lines */}
-                {renderWeightForHeightLines(patientData.measurement.weight, patientData.measurement.height, whChartData)}
+                {renderWeightForHeightLines(whChartData, patientData.measurements)}
               </LineChart>
             </ResponsiveContainer>
+            )}
             <p className="chart-note" style={{fontSize: '0.8rem', color: '#666', marginTop: '10px'}}>
               Uses Weight-for-Length for &lt;85cm and Weight-for-Height/Stature for ≥85cm.
             </p>

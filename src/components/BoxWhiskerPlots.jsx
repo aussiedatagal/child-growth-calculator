@@ -94,12 +94,12 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   const [loading, setLoading] = useState(true)
   
   useEffect(() => {
-    if (patientData.gender && patientData.measurement) {
+    if (patientData.gender && patientData.measurements && patientData.measurements.length > 0) {
       loadReferenceData()
     } else {
       setLoading(false)
     }
-  }, [patientData.gender, patientData.measurement, referenceSources?.age])
+  }, [patientData.gender, patientData.measurements, referenceSources?.age])
 
   const loadReferenceData = async () => {
     setLoading(true)
@@ -317,9 +317,13 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   }
 
   const getWeightHeightReference = () => {
-    if (!weightHeightData || !patientData.measurement || !patientData.measurement.height) return null
+    if (!weightHeightData || !patientData.measurements || patientData.measurements.length === 0) return null
     
-    const patientHeight = patientData.measurement.height
+    // Use the last measurement
+    const lastMeasurement = patientData.measurements[patientData.measurements.length - 1]
+    if (!lastMeasurement || !lastMeasurement.height) return null
+    
+    const patientHeight = lastMeasurement.height
     const closest = weightHeightData.reduce((closest, item) => {
       if (!closest) return item
       const closestDiff = Math.abs(closest.height - patientHeight)
@@ -336,11 +340,12 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     return <div className="loading">Loading reference data...</div>
   }
 
-  if (!patientData.measurement || !patientData.gender) {
+  if (!patientData.measurements || patientData.measurements.length === 0 || !patientData.gender) {
     return null
   }
 
-  const measurement = patientData.measurement
+  // Use the last measurement for box plots
+  const measurement = patientData.measurements[patientData.measurements.length - 1]
 
   const getSourceLabel = (source) => (source === 'cdc' ? 'CDC' : 'WHO')
 
