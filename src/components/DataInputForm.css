@@ -87,28 +87,47 @@
 }
 
 .measurements-table {
-  overflow-x: auto;
+  width: 100%;
+  max-width: 100%;
   margin-bottom: 1rem;
+  overflow-x: auto;
+  box-sizing: border-box;
 }
 
 .measurements-table table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  table-layout: fixed;
+  box-sizing: border-box;
 }
 
 .measurements-table th {
   background-color: #f8f9fa;
-  padding: 0.75rem;
+  padding: 0.35rem 0.2rem;
   text-align: left;
   font-weight: 600;
   color: #555;
   border-bottom: 2px solid #e0e0e0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.measurements-table th:first-child {
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  padding: 0.35rem 0.15rem;
 }
 
 .measurements-table td {
-  padding: 0.75rem;
+  padding: 0.35rem 0.2rem;
   border-bottom: 1px solid #f0f0f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-wrap: break-word;
 }
 
 .measurements-table tr:hover {
@@ -178,9 +197,70 @@
   color: #667eea;
 }
 
+/* Desktop: prevent horizontal scrolling by making table fit */
+@media (min-width: 768px) {
+  .measurements-table {
+    overflow-x: visible;
+  }
+  
+  .measurements-table table {
+    table-layout: fixed;
+    width: 100%;
+  }
+  
+  .measurements-table th,
+  .measurements-table td {
+    padding: 0.3rem 0.15rem;
+  }
+  
+  /* Use percentage-based widths to ensure table fits - total should be 100% */
+  .measurements-table th:first-child,
+  .measurements-table td:first-child {
+    width: 6%;
+  }
+  
+  .measurements-table th:nth-child(2),
+  .measurements-table td:nth-child(2) {
+    width: 16%;
+  }
+  
+  .measurements-table th:nth-child(3),
+  .measurements-table td:nth-child(3) {
+    width: 13%;
+  }
+  
+  .measurements-table th:nth-child(4),
+  .measurements-table td:nth-child(4) {
+    width: 13%;
+  }
+  
+  .measurements-table th:nth-child(5),
+  .measurements-table td:nth-child(5) {
+    width: 13%;
+  }
+  
+  .measurements-table th:nth-child(6),
+  .measurements-table td:nth-child(6) {
+    width: 12%;
+  }
+  
+  .measurements-table th:last-child,
+  .measurements-table td:last-child {
+    width: 17%;
+  }
+  
+  /* Make action buttons smaller to fit */
+  .measurements-table td:last-child button {
+    padding: 0.15rem 0.25rem;
+    font-size: 0.65rem;
+    margin-right: 0.15rem;
+  }
+}
+
 @media (max-width: 767px) {
   .measurements-table {
     font-size: 0.8rem;
+    overflow-x: auto; /* Allow scrolling on mobile */
   }
 
   .measurements-table th,

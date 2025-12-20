@@ -50,6 +50,13 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
   const [inlineEditingIndex, setInlineEditingIndex] = useState(null)
   const [inlineEditData, setInlineEditData] = useState(null)
   const [expandedRows, setExpandedRows] = useState(new Set())
+  const [showPatientInfo, setShowPatientInfo] = useState(false)
+  const [showAddMeasurementForm, setShowAddMeasurementForm] = useState(false)
+  const [patientInfoFormData, setPatientInfoFormData] = useState({
+    name: '',
+    gender: '',
+    birthDate: ''
+  })
   const debounceTimerRef = useRef(null)
 
   useEffect(() => {
@@ -140,9 +147,11 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
     if (editingIndex !== null) {
       onUpdateMeasurement(editingIndex, measurement)
       setEditingIndex(null)
+      setShowAddMeasurementForm(false)
     } else {
       onAddMeasurement(measurement)
       setFormData(getInitialFormData())
+      setShowAddMeasurementForm(false)
     }
   }
 
@@ -248,10 +257,18 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
 
   const handlePatientInfoChange = (e) => {
     const { name, value } = e.target
+    setPatientInfoFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+
+  const handleSavePatientInfo = () => {
     onDataUpdate({
       ...patientData,
-      [name]: value
+      ...patientInfoFormData
     })
+    setShowPatientInfo(false)
   }
 
 
@@ -414,50 +431,109 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
 
       {selectedPersonId && (
         <>
-      <h2>Patient Information</h2>
-      
-      <div className="form-group">
-        <label htmlFor="name">Name (optional)</label>
-        <input
-          type="text"
-          id="name"
-          name="name"
-          value={patientData.name}
-          onChange={handlePatientInfoChange}
-          placeholder="Enter patient name"
-        />
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="gender">Gender *</label>
-        <select
-          id="gender"
-          name="gender"
-          value={patientData.gender}
-          onChange={handlePatientInfoChange}
-          required
+      <div style={{ marginBottom: '1rem' }}>
+        <div 
+          onClick={() => setShowPatientInfo(!showPatientInfo)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0.75rem',
+            backgroundColor: showPatientInfo ? '#f8f9fa' : 'white',
+            border: '1px solid #e0e0e0',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            transition: 'background-color 0.2s'
+          }}
         >
-          <option value="">Select gender</option>
-          <option value="male">Male</option>
-          <option value="female">Female</option>
-        </select>
+          <h2 style={{ margin: 0, fontSize: '1.2rem' }}>Patient Information</h2>
+          <span style={{ 
+            display: 'inline-block',
+            transform: showPatientInfo ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s',
+            fontSize: '0.8rem',
+            color: '#667eea'
+          }}>▶</span>
+        </div>
+        
+        {showPatientInfo && (
+          <div style={{ 
+            padding: '1rem',
+            backgroundColor: '#f8f9fa',
+            border: '1px solid #e0e0e0',
+            borderTop: 'none',
+            borderRadius: '0 0 6px 6px',
+            marginTop: '-1px'
+          }}>
+            <div className="form-group">
+              <label htmlFor="name">Name (optional)</label>
+              <input
+                type="text"
+                id="name"
+                name="name"
+                value={patientInfoFormData.name}
+                onChange={handlePatientInfoChange}
+                placeholder="Enter patient name"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="gender">Gender *</label>
+              <select
+                id="gender"
+                name="gender"
+                value={patientInfoFormData.gender}
+                onChange={handlePatientInfoChange}
+                required
+              >
+                <option value="">Select gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="birthDate">Birth Date</label>
+              <input
+                type="date"
+                id="birthDate"
+                name="birthDate"
+                value={patientInfoFormData.birthDate}
+                onChange={handlePatientInfoChange}
+              />
+              <small>Or enter age manually below</small>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+              <button
+                type="button"
+                onClick={handleSavePatientInfo}
+                className="submit-btn"
+                style={{ flex: 1, marginTop: 0 }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPatientInfoFormData({
+                    name: patientData.name || '',
+                    gender: patientData.gender || '',
+                    birthDate: patientData.birthDate || ''
+                  })
+                  setShowPatientInfo(false)
+                }}
+                className="submit-btn"
+                style={{ flex: 1, marginTop: 0, background: '#95a5a6' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="form-group">
-        <label htmlFor="birthDate">Birth Date</label>
-        <input
-          type="date"
-          id="birthDate"
-          name="birthDate"
-          value={patientData.birthDate}
-          onChange={handlePatientInfoChange}
-        />
-        <small>Or enter age manually below</small>
-      </div>
-
-      <h2>{editingIndex !== null ? 'Edit Measurement' : 'Add Measurement'}</h2>
-      
-      <div className="form-group">
+      <div className="form-group" style={{ marginBottom: '1.5rem' }}>
         <label htmlFor="dataSource">Data Source:</label>
         <select
           id="dataSource"
@@ -471,350 +547,385 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
         </select>
         <small>Applies to all charts</small>
       </div>
-      
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="date">Measurement Date *</label>
-          <input
-            type="date"
-            id="date"
-            name="date"
-            value={formData.date}
-            onChange={handleInputChange}
-            required
-          />
-        </div>
 
-        {!patientData.birthDate && (
-          <div style={{ 
-            padding: '0.75rem', 
-            background: '#fff3cd', 
-            borderRadius: '6px', 
-            marginBottom: '1rem',
-            border: '1px solid #ffc107',
-            color: '#856404',
-            fontSize: '0.9rem'
-          }}>
-            ⚠️ Birth date is required to calculate age. Please set the person's birth date in the patient information section above.
-          </div>
-        )}
-
-        <div className="form-group">
-          <label htmlFor="height">Height (cm)</label>
-          <input
-            type="number"
-            id="height"
-            name="height"
-            value={formData.height}
-            onChange={handleInputChange}
-            step="0.1"
-            min="0"
-            placeholder="e.g., 85.5"
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="weight">Weight (kg)</label>
-          <input
-            type="number"
-            id="weight"
-            name="weight"
-            value={formData.weight}
-            onChange={handleInputChange}
-            step="0.01"
-            min="0"
-            placeholder="e.g., 12.3"
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="headCircumference">Head Circumference (cm)</label>
-          <input
-            type="number"
-            id="headCircumference"
-            name="headCircumference"
-            value={formData.headCircumference}
-            onChange={handleInputChange}
-            step="0.1"
-            min="0"
-            placeholder="e.g., 45.2"
-          />
-        </div>
-
-        {referenceSources?.age === 'who' && (
-          <div className="advanced-section">
-            <div
-              className="advanced-toggle"
-              onClick={() => setShowAdvanced(prev => !prev)}
-              style={{ cursor: 'pointer', userSelect: 'none' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ 
-                  display: 'inline-block',
-                  transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.2s',
-                  fontSize: '0.8rem'
-                }}>▶</span>
-                <span style={{ fontWeight: 500, color: '#555' }}>Advanced Measurements</span>
-              </span>
-              <small style={{ display: 'block', marginTop: '0.25rem', marginLeft: '1.5rem', color: '#888' }}>
-                Arm circumference and skinfolds (optional, WHO reference only)
-              </small>
-            </div>
-
-            {showAdvanced && (
-            <>
-              <div className="form-group">
-                <label htmlFor="armCircumference">Mid-Upper Arm Circumference (cm)</label>
-                <input
-                  type="number"
-                  id="armCircumference"
-                  name="armCircumference"
-                  value={formData.armCircumference}
-                  onChange={handleInputChange}
-                  step="0.1"
-                  min="0"
-                  placeholder="e.g., 16.5"
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="subscapularSkinfold">Subscapular Skinfold (mm)</label>
-                <input
-                  type="number"
-                  id="subscapularSkinfold"
-                  name="subscapularSkinfold"
-                  value={formData.subscapularSkinfold}
-                  onChange={handleInputChange}
-                  step="0.1"
-                  min="0"
-                  placeholder="e.g., 8.3"
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="tricepsSkinfold">Triceps Skinfold (mm)</label>
-                <input
-                  type="number"
-                  id="tricepsSkinfold"
-                  name="tricepsSkinfold"
-                  value={formData.tricepsSkinfold}
-                  onChange={handleInputChange}
-                  step="0.1"
-                  min="0"
-                  placeholder="e.g., 9.1"
-                />
-              </div>
-            </>
-            )}
-          </div>
-        )}
-
-        <div className="form-group" style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
-          <button type="submit" className="submit-btn" style={{ flex: 1 }}>
-            {editingIndex !== null ? 'Update Measurement' : 'Add Measurement'}
+      <div style={{ marginBottom: '1.5rem' }}>
+        {!showAddMeasurementForm ? (
+          <button
+            type="button"
+            onClick={() => setShowAddMeasurementForm(true)}
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              background: '#667eea',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '1rem',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            + Add Measurement
           </button>
-          {editingIndex !== null && (
-            <button type="button" onClick={handleCancelEdit} className="clear-btn" style={{ flex: 1, background: '#95a5a6' }}>
-              Cancel
-            </button>
-          )}
-        </div>
-      </form>
+        ) : (
+          <div style={{
+            padding: '1rem',
+            backgroundColor: '#f8f9fa',
+            border: '1px solid #e0e0e0',
+            borderRadius: '6px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{editingIndex !== null ? 'Edit Measurement' : 'Add Measurement'}</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddMeasurementForm(false)
+                  setEditingIndex(null)
+                  setFormData(getInitialFormData())
+                }}
+                style={{
+                  padding: '0.25rem 0.5rem',
+                  background: '#95a5a6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label htmlFor="date">Measurement Date *</label>
+                <input
+                  type="date"
+                  id="date"
+                  name="date"
+                  value={formData.date}
+                  onChange={handleInputChange}
+                  required
+                />
+              </div>
+
+              {!patientData.birthDate && (
+                <div style={{ 
+                  padding: '0.75rem', 
+                  background: '#fff3cd', 
+                  borderRadius: '6px', 
+                  marginBottom: '1rem',
+                  border: '1px solid #ffc107',
+                  color: '#856404',
+                  fontSize: '0.9rem'
+                }}>
+                  ⚠️ Birth date is required to calculate age. Please set the person's birth date in the patient information section above.
+                </div>
+              )}
+
+              <div className="form-group">
+                <label htmlFor="height">Height (cm)</label>
+                <input
+                  type="number"
+                  id="height"
+                  name="height"
+                  value={formData.height}
+                  onChange={handleInputChange}
+                  step="0.1"
+                  min="0"
+                  placeholder="e.g., 85.5"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="weight">Weight (kg)</label>
+                <input
+                  type="number"
+                  id="weight"
+                  name="weight"
+                  value={formData.weight}
+                  onChange={handleInputChange}
+                  step="0.01"
+                  min="0"
+                  placeholder="e.g., 12.3"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="headCircumference">Head Circumference (cm)</label>
+                <input
+                  type="number"
+                  id="headCircumference"
+                  name="headCircumference"
+                  value={formData.headCircumference}
+                  onChange={handleInputChange}
+                  step="0.1"
+                  min="0"
+                  placeholder="e.g., 45.2"
+                />
+              </div>
+
+              {referenceSources?.age === 'who' && (
+                <div className="advanced-section">
+                  <div
+                    className="advanced-toggle"
+                    onClick={() => setShowAdvanced(prev => !prev)}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ 
+                        display: 'inline-block',
+                        transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.2s',
+                        fontSize: '0.8rem'
+                      }}>▶</span>
+                      <span style={{ fontWeight: 500, color: '#555' }}>Advanced Measurements</span>
+                    </span>
+                    <small style={{ display: 'block', marginTop: '0.25rem', marginLeft: '1.5rem', color: '#888' }}>
+                      Arm circumference and skinfolds (optional, WHO reference only)
+                    </small>
+                  </div>
+
+                  {showAdvanced && (
+                  <>
+                    <div className="form-group">
+                      <label htmlFor="armCircumference">Mid-Upper Arm Circumference (cm)</label>
+                      <input
+                        type="number"
+                        id="armCircumference"
+                        name="armCircumference"
+                        value={formData.armCircumference}
+                        onChange={handleInputChange}
+                        step="0.1"
+                        min="0"
+                        placeholder="e.g., 16.5"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="subscapularSkinfold">Subscapular Skinfold (mm)</label>
+                      <input
+                        type="number"
+                        id="subscapularSkinfold"
+                        name="subscapularSkinfold"
+                        value={formData.subscapularSkinfold}
+                        onChange={handleInputChange}
+                        step="0.1"
+                        min="0"
+                        placeholder="e.g., 8.3"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="tricepsSkinfold">Triceps Skinfold (mm)</label>
+                      <input
+                        type="number"
+                        id="tricepsSkinfold"
+                        name="tricepsSkinfold"
+                        value={formData.tricepsSkinfold}
+                        onChange={handleInputChange}
+                        step="0.1"
+                        min="0"
+                        placeholder="e.g., 9.1"
+                      />
+                    </div>
+                  </>
+                  )}
+                </div>
+              )}
+
+              <div className="form-group" style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
+                <button type="submit" className="submit-btn" style={{ flex: 1 }}>
+                  {editingIndex !== null ? 'Update Measurement' : 'Add Measurement'}
+                </button>
+                {editingIndex !== null && (
+                  <button type="button" onClick={handleCancelEdit} className="clear-btn" style={{ flex: 1, background: '#95a5a6' }}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
 
       {patientData.measurements && patientData.measurements.length > 0 && (
         <div className="measurements-list">
           <h3>Measurements ({patientData.measurements.length})</h3>
-          <div className="measurements-table">
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: '30px' }}></th>
-                  <th>Date</th>
-                  <th>Age</th>
-                  <th>Weight (kg)</th>
-                  <th>Height (cm)</th>
-                  <th>HC (cm)</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {patientData.measurements.map((m, index) => {
-                  const isEditing = inlineEditingIndex === index
-                  const editData = isEditing ? inlineEditData : null
-                  const isExpanded = expandedRows.has(index)
-                  const hasAdvanced = m.armCircumference || m.subscapularSkinfold || m.tricepsSkinfold
-                  
-                  return (
-                    <React.Fragment key={index}>
-                    <tr>
-                      <td>
-                        {hasAdvanced && (
-                          <button
-                            onClick={() => {
-                              const newExpanded = new Set(expandedRows)
-                              if (isExpanded) {
-                                newExpanded.delete(index)
-                              } else {
-                                newExpanded.add(index)
-                              }
-                              setExpandedRows(newExpanded)
-                            }}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              padding: '0.25rem',
-                              fontSize: '0.9rem',
-                              color: '#667eea'
-                            }}
-                            title={isExpanded ? 'Hide advanced measurements' : 'Show advanced measurements'}
-                          >
-                            {isExpanded ? '▼' : '▶'}
-                          </button>
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            type="date"
-                            value={editData.date}
-                            onChange={(e) => handleInlineEditChange('date', e.target.value)}
-                            style={{ width: '100%', padding: '0.25rem', fontSize: '0.85rem' }}
-                          />
-                        ) : (
-                          new Date(m.date).toLocaleDateString()
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <span style={{ fontSize: '0.85rem', color: '#666' }}>
-                            {patientData.birthDate 
-                              ? formatAge(calculateAge(patientData.birthDate, editData.date)?.years || 0)
-                              : 'Set DOB first'
+          <div className="measurements-expandable">
+            {patientData.measurements.map((m, index) => {
+              const isEditing = inlineEditingIndex === index
+              const editData = isEditing ? inlineEditData : null
+              const isExpanded = expandedRows.has(index)
+              const hasAdvanced = m.armCircumference || m.subscapularSkinfold || m.tricepsSkinfold
+              
+              return (
+                <div key={index} className="measurement-item">
+                  <div 
+                    className="measurement-summary"
+                    onClick={() => {
+                      const newExpanded = new Set(expandedRows)
+                      if (isExpanded) {
+                        newExpanded.delete(index)
+                      } else {
+                        newExpanded.add(index)
+                      }
+                      setExpandedRows(newExpanded)
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.75rem',
+                      backgroundColor: isExpanded ? '#f8f9fa' : 'white',
+                      border: '1px solid #e0e0e0',
+                      borderRadius: '6px',
+                      marginBottom: '0.5rem',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.2s'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+                      <span style={{ 
+                        display: 'inline-block',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.2s',
+                        fontSize: '0.8rem',
+                        color: '#667eea'
+                      }}>▶</span>
+                      <span style={{ fontWeight: 600, color: '#333' }}>
+                        {new Date(m.date).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {!isExpanded && (
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleEditMeasurement(index)
+                          }}
+                          style={{ 
+                            padding: '0.25rem 0.5rem', 
+                            background: '#667eea', 
+                            color: 'white', 
+                            border: 'none', 
+                            borderRadius: '4px', 
+                            fontSize: '0.75rem', 
+                            cursor: 'pointer' 
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (confirm('Delete this measurement?')) {
+                              onDeleteMeasurement(index)
                             }
-                          </span>
-                        ) : (
-                          formatAge(m.ageYears)
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            value={editData.weight}
-                            onChange={(e) => handleInlineEditChange('weight', e.target.value)}
-                            placeholder="kg"
-                            step="0.01"
-                            style={{ width: '100%', padding: '0.25rem', fontSize: '0.85rem' }}
-                          />
-                        ) : (
-                          m.weight ? `${m.weight} kg` : '-'
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            value={editData.height}
-                            onChange={(e) => handleInlineEditChange('height', e.target.value)}
-                            placeholder="cm"
-                            step="0.1"
-                            style={{ width: '100%', padding: '0.25rem', fontSize: '0.85rem' }}
-                          />
-                        ) : (
-                          m.height ? `${m.height} cm` : '-'
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            value={editData.headCircumference}
-                            onChange={(e) => handleInlineEditChange('headCircumference', e.target.value)}
-                            placeholder="cm"
-                            step="0.1"
-                            style={{ width: '100%', padding: '0.25rem', fontSize: '0.85rem' }}
-                          />
-                        ) : (
-                          m.headCircumference ? `${m.headCircumference} cm` : '-'
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <div style={{ display: 'flex', gap: '0.25rem' }}>
-                            <button 
-                              onClick={() => handleSaveInlineEdit(index)}
-                              style={{ 
-                                padding: '0.25rem 0.5rem', 
-                                background: '#667eea', 
-                                color: 'white', 
-                                border: 'none', 
-                                borderRadius: '4px', 
-                                fontSize: '0.75rem', 
-                                cursor: 'pointer' 
-                              }}
-                            >
-                              Save
-                            </button>
-                            <button 
-                              onClick={handleCancelInlineEdit}
-                              style={{ 
-                                padding: '0.25rem 0.5rem', 
-                                background: '#95a5a6', 
-                                color: 'white', 
-                                border: 'none', 
-                                borderRadius: '4px', 
-                                fontSize: '0.75rem', 
-                                cursor: 'pointer' 
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <button 
-                              onClick={() => handleEditMeasurement(index)} 
-                              style={{ 
-                                padding: '0.25rem 0.5rem', 
-                                marginRight: '0.5rem',
-                                background: '#667eea', 
-                                color: 'white', 
-                                border: 'none', 
-                                borderRadius: '4px', 
-                                fontSize: '0.75rem', 
-                                cursor: 'pointer' 
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button 
-                              onClick={() => {
-                                if (confirm('Delete this measurement?')) {
-                                  onDeleteMeasurement(index)
-                                }
-                              }} 
-                              style={{
-                                padding: '0.25rem 0.5rem',
-                                background: '#e74c3c',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr key={`${index}-detail`} style={{ backgroundColor: '#f8f9fa' }}>
-                        <td></td>
-                        <td colSpan="6" style={{ padding: '0.75rem', fontSize: '0.9rem' }}>
+                          }}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            background: '#e74c3c',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {isExpanded && (
+                    <div className="measurement-details" style={{
+                      padding: '1rem',
+                      backgroundColor: '#f8f9fa',
+                      border: '1px solid #e0e0e0',
+                      borderTop: 'none',
+                      borderRadius: '0 0 6px 6px',
+                      marginBottom: '0.5rem'
+                    }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Date</label>
+                          {isEditing ? (
+                            <input
+                              type="date"
+                              value={editData.date}
+                              onChange={(e) => handleInlineEditChange('date', e.target.value)}
+                              style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                            />
+                          ) : (
+                            <div style={{ padding: '0.5rem', color: '#333' }}>{new Date(m.date).toLocaleDateString()}</div>
+                          )}
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Age</label>
+                          {isEditing ? (
+                            <div style={{ padding: '0.5rem', color: '#666', fontSize: '0.9rem' }}>
+                              {patientData.birthDate 
+                                ? formatAge(calculateAge(patientData.birthDate, editData.date)?.years || 0)
+                                : 'Set DOB first'
+                              }
+                            </div>
+                          ) : (
+                            <div style={{ padding: '0.5rem', color: '#333' }}>{formatAge(m.ageYears)}</div>
+                          )}
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Weight (kg)</label>
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              value={editData.weight}
+                              onChange={(e) => handleInlineEditChange('weight', e.target.value)}
+                              placeholder="kg"
+                              step="0.01"
+                              style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                            />
+                          ) : (
+                            <div style={{ padding: '0.5rem', color: '#333' }}>{m.weight ? `${m.weight} kg` : '-'}</div>
+                          )}
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Height (cm)</label>
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              value={editData.height}
+                              onChange={(e) => handleInlineEditChange('height', e.target.value)}
+                              placeholder="cm"
+                              step="0.1"
+                              style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                            />
+                          ) : (
+                            <div style={{ padding: '0.5rem', color: '#333' }}>{m.height ? `${m.height} cm` : '-'}</div>
+                          )}
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Head Circumference (cm)</label>
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              value={editData.headCircumference}
+                              onChange={(e) => handleInlineEditChange('headCircumference', e.target.value)}
+                              placeholder="cm"
+                              step="0.1"
+                              style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                            />
+                          ) : (
+                            <div style={{ padding: '0.5rem', color: '#333' }}>{m.headCircumference ? `${m.headCircumference} cm` : '-'}</div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {hasAdvanced && (
+                        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0' }}>
+                          <h4 style={{ marginBottom: '0.75rem', fontSize: '0.95rem', color: '#555' }}>Advanced Measurements</h4>
                           <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
                             <div>
                               <strong>Arm Circumference:</strong>{' '}
@@ -825,7 +936,7 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
                                   onChange={(e) => handleInlineEditChange('armCircumference', e.target.value)}
                                   placeholder="cm"
                                   step="0.1"
-                                  style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem' }}
+                                  style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
                                 <span style={{ color: '#666' }}>
@@ -842,7 +953,7 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
                                   onChange={(e) => handleInlineEditChange('subscapularSkinfold', e.target.value)}
                                   placeholder="mm"
                                   step="0.1"
-                                  style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem' }}
+                                  style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
                                 <span style={{ color: '#666' }}>
@@ -859,7 +970,7 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
                                   onChange={(e) => handleInlineEditChange('tricepsSkinfold', e.target.value)}
                                   placeholder="mm"
                                   step="0.1"
-                                  style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem' }}
+                                  style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
                                 <span style={{ color: '#666' }}>
@@ -868,14 +979,83 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
                               )}
                             </div>
                           </div>
-                        </td>
-                      </tr>
-                    )}
-                    </React.Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
+                        </div>
+                      )}
+                      
+                      <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        {isEditing ? (
+                          <>
+                            <button 
+                              onClick={() => handleSaveInlineEdit(index)}
+                              style={{ 
+                                padding: '0.5rem 1rem', 
+                                background: '#667eea', 
+                                color: 'white', 
+                                border: 'none', 
+                                borderRadius: '4px', 
+                                fontSize: '0.9rem', 
+                                cursor: 'pointer' 
+                              }}
+                            >
+                              Save
+                            </button>
+                            <button 
+                              onClick={handleCancelInlineEdit}
+                              style={{ 
+                                padding: '0.5rem 1rem', 
+                                background: '#95a5a6', 
+                                color: 'white', 
+                                border: 'none', 
+                                borderRadius: '4px', 
+                                fontSize: '0.9rem', 
+                                cursor: 'pointer' 
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button 
+                              onClick={() => handleEditMeasurement(index)}
+                              style={{ 
+                                padding: '0.5rem 1rem', 
+                                background: '#667eea', 
+                                color: 'white', 
+                                border: 'none', 
+                                borderRadius: '4px', 
+                                fontSize: '0.9rem', 
+                                cursor: 'pointer' 
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button 
+                              onClick={() => {
+                                if (confirm('Delete this measurement?')) {
+                                  onDeleteMeasurement(index)
+                                }
+                              }}
+                              style={{
+                                padding: '0.5rem 1rem',
+                                background: '#e74c3c',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '0.9rem',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
           <button onClick={onClearData} className="clear-btn" style={{ marginTop: '1rem' }}>
             Clear All Data
