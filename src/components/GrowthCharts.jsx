@@ -158,6 +158,35 @@ const OrderedLegend = memo(({ payload, percentiles = ['97th', '85th', '75th', '5
   )
 })
 
+// Custom Y-axis label component factory for better vertical centering of longer labels
+const createYAxisLabel = (labelText) => {
+  return (props) => {
+    // Recharts passes viewBox
+    const { viewBox } = props
+    
+    if (!viewBox) return null
+    const { x, y, height } = viewBox
+    // Center the label vertically in the Y-axis area (shift down)
+    // Position closer to the axis - use a smaller offset from x
+    const labelX = x + 5
+    const labelY = y + height / 2
+    
+    return (
+      <text
+        x={labelX}
+        y={labelY}
+        fill="#666"
+        textAnchor="middle"
+        dominantBaseline="middle"
+        transform={`rotate(-90, ${labelX}, ${labelY})`}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}
+      >
+        {labelText}
+      </text>
+    )
+  }
+}
+
 // Custom label renderer for end of line labels - only shows at last point
 const createEndLabel = (name, color, isPatient = false) => {
   return ({ viewBox, value, payload }) => {
@@ -539,15 +568,29 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   }
 
   const prepareChartData = useCallback((data, measurements, valueKey, getValue) => {
-    if (!data || !measurements || measurements.length === 0) return []
+    // Always return reference data even if no measurements, so percentile lines show
+    if (!data) return []
+    // If no measurements, just return reference data with null patient values
+    if (!measurements || measurements.length === 0) {
+      return data.map(ref => ({
+        ageYears: ref.ageYears,
+        ageLabel: formatAgeLabel(ref.ageYears),
+        ...ref,
+        [valueKey]: null
+      }))
+    }
     
-    // Start with reference data
-    const chartData = data.map(ref => ({
-      ageYears: ref.ageYears,
-      ageLabel: formatAgeLabel(ref.ageYears),
-      ...ref,
-      [valueKey]: null
-    }))
+    // Start with reference data - ensure all properties are preserved
+    const chartData = data.map(ref => {
+      const point = {
+        ageYears: ref.ageYears,
+        ageLabel: formatAgeLabel(ref.ageYears),
+        ...ref,
+        [valueKey]: null
+      }
+      // Explicitly ensure all percentile keys exist (for debugging)
+      return point
+    })
     
     // Create patient measurement points
     const patientPoints = []
@@ -843,21 +886,23 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const getSourceLabel = useCallback((source) => (source === 'cdc' ? 'CDC' : 'WHO'), [])
 
   const calculateAgeDomain = useCallback((measurements) => {
-    if (!measurements || measurements.length === 0) return [0, 1]
+    if (!measurements || measurements.length === 0) return [0, 5] // Default to 0-5 years if no measurements
     
     const ages = measurements.map(m => m.ageYears).filter(a => a != null)
-    if (ages.length === 0) return [0, 1]
+    if (ages.length === 0) return [0, 5]
     
     const minAge = Math.min(...ages)
     const maxAge = Math.max(...ages)
     
     // Add some padding before min for readability, but no padding after max so line reaches edge
+    // For single measurements, ensure we show a reasonable range to see percentile curves
     const range = Math.max(maxAge - minAge, 0.5)
     const leftPadding = range * 0.1
+    const rightPadding = range * 0.1 // Add some padding on right too for single measurements
     
     return [
       Math.max(0, minAge - leftPadding),
-      maxAge  // No padding on the right - line should go to the edge
+      maxAge + rightPadding
     ]
   }, [])
 
@@ -934,9 +979,24 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   }, [])
 
   const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, chartData, measurements, getValue) => {
-    // Get the last measurement for percentile display in legend
-    const lastMeasurement = measurements && measurements.length > 0 
-      ? measurements[measurements.length - 1] 
+    // Get the last measurement for THIS SPECIFIC TYPE (not just the latest measurement overall)
+    // Filter measurements to only those that have a value for this type, then get the latest one by date
+    const measurementsWithValue = measurements && measurements.length > 0
+      ? measurements.filter(m => {
+          const value = getValue(m)
+          return value != null && value !== undefined && value > 0
+        })
+      : []
+    
+    // Sort by date to ensure we get the latest one
+    const sortedByDate = measurementsWithValue.sort((a, b) => {
+      const dateA = new Date(a.date || 0)
+      const dateB = new Date(b.date || 0)
+      return dateA - dateB
+    })
+    
+    const lastMeasurement = sortedByDate.length > 0
+      ? sortedByDate[sortedByDate.length - 1] // Latest date with this measurement type
       : null
     const lastValue = lastMeasurement ? getValue(lastMeasurement) : null
     const lastAge = lastMeasurement?.ageYears
@@ -971,7 +1031,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     // Custom label for patient point that shows at the actual point location (only for last point)
-    const PatientPointLabel = ({ x, y, value, index, viewBox }) => {
+    const PatientPointLabel = ({ x, y, value, index, viewBox, payload }) => {
       // Only show label on the last data point with a value
       const dataLength = chartData?.length || 0
       const lastIndexWithValue = chartData ? 
@@ -979,9 +1039,16 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           .filter(d => d.value != null)
           .pop()?.index : -1
       
-      if (value == null || value === undefined || index !== lastIndexWithValue || !patientPercentile || !viewBox) return null
-      // Position label outside the chart area to the right
-      const labelX = viewBox.x + viewBox.width + 5
+      if (value == null || value === undefined || index !== lastIndexWithValue || !patientPercentile) return null
+      
+      // Try to get viewBox from different possible sources
+      let labelX = x + 10 // Default: just to the right of the point
+      if (viewBox && viewBox.x !== undefined && viewBox.width !== undefined) {
+        labelX = viewBox.x + viewBox.width + 5
+      } else if (payload && payload.viewBox) {
+        labelX = payload.viewBox.x + payload.viewBox.width + 5
+      }
+      
       return (
         <text
           x={labelX}
@@ -1017,25 +1084,25 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false}>
+        <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('97th', '#ff6b6b')} position="right" />
         </Line>,
-        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" isAnimationActive={false}>
+        <Line key="p85" type="monotone" dataKey={`${dataKeyPrefix}P85`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('85th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" isAnimationActive={false}>
+        <Line key="p75" type="monotone" dataKey={`${dataKeyPrefix}P75`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('75th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" isAnimationActive={false}>
+        <Line key="p50" type="monotone" dataKey={`${dataKeyPrefix}P50`} stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('50th', '#4ecdc4')} position="right" />
         </Line>,
-        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" isAnimationActive={false}>
+        <Line key="p25" type="monotone" dataKey={`${dataKeyPrefix}P25`} stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('25th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" isAnimationActive={false}>
+        <Line key="p15" type="monotone" dataKey={`${dataKeyPrefix}P15`} stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('15th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" isAnimationActive={false}>
+        <Line key="p3" type="monotone" dataKey={`${dataKeyPrefix}P3`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('3rd', '#ff6b6b')} position="right" />
         </Line>,
       ]
@@ -1075,9 +1142,20 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   }, [getPatientPercentile, getNumericPercentile])
 
   const renderWeightForHeightLines = useCallback((chartData, measurements) => {
-    // Get the last measurement for percentile display
-    const lastMeasurement = measurements && measurements.length > 0 
-      ? measurements[measurements.length - 1] 
+    // Get the last measurement that has BOTH weight and height
+    const measurementsWithBoth = measurements && measurements.length > 0
+      ? measurements.filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
+      : []
+    
+    // Sort by date to ensure we get the latest one
+    const sortedByDate = measurementsWithBoth.sort((a, b) => {
+      const dateA = new Date(a.date || 0)
+      const dateB = new Date(b.date || 0)
+      return dateA - dateB
+    })
+    
+    const lastMeasurement = sortedByDate.length > 0
+      ? sortedByDate[sortedByDate.length - 1] // Latest date with both weight and height
       : null
     const lastWeight = lastMeasurement?.weight
     const lastHeight = lastMeasurement?.height
@@ -1090,11 +1168,18 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     
     // Create label component factory that captures line properties
     const createEndLabel = (lineName, lineColor, isPatient = false) => {
-      return ({ x, y, value, index, viewBox }) => {
+      return ({ x, y, value, index, viewBox, payload }) => {
         // Only show label at the last data point and if value exists
-        if (value == null || value === undefined || index !== lastIndex || !viewBox) return null
-        // Position label outside the chart area to the right
-        const labelX = viewBox.x + viewBox.width + 5
+        if (value == null || value === undefined || index !== lastIndex) return null
+        
+        // Try to get viewBox from different possible sources
+        let labelX = x + 5 // Default: just to the right of the point
+        if (viewBox && viewBox.x !== undefined && viewBox.width !== undefined) {
+          labelX = viewBox.x + viewBox.width + 5
+        } else if (payload && payload.viewBox) {
+          labelX = payload.viewBox.x + payload.viewBox.width + 5
+        }
+        
         return (
           <text
             x={labelX}
@@ -1112,7 +1197,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     // Custom label for patient point that shows at the actual point location (only for last point)
-    const PatientPointLabel = ({ x, y, value, index, viewBox }) => {
+    const PatientPointLabel = ({ x, y, value, index, viewBox, payload }) => {
       // Only show label on the last data point with a value
       const dataLength = chartData?.length || 0
       const lastIndexWithValue = chartData ? 
@@ -1120,9 +1205,16 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           .filter(d => d.value != null)
           .pop()?.index : -1
       
-      if (value == null || value === undefined || index !== lastIndexWithValue || !patientPercentile || !viewBox) return null
-      // Position label outside the chart area to the right
-      const labelX = viewBox.x + viewBox.width + 5
+      if (value == null || value === undefined || index !== lastIndexWithValue || !patientPercentile) return null
+      
+      // Try to get viewBox from different possible sources
+      let labelX = x + 10 // Default: just to the right of the point
+      if (viewBox && viewBox.x !== undefined && viewBox.width !== undefined) {
+        labelX = viewBox.x + viewBox.width + 5
+      } else if (payload && payload.viewBox) {
+        labelX = payload.viewBox.x + payload.viewBox.width + 5
+      }
+      
       return (
         <text
           x={labelX}
@@ -1158,25 +1250,25 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
-        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false}>
+        <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('97th', '#ff6b6b')} position="right" />
         </Line>,
-        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" isAnimationActive={false}>
+        <Line key="p85" type="monotone" dataKey="p85" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="85th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('85th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" isAnimationActive={false}>
+        <Line key="p75" type="monotone" dataKey="p75" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="75th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('75th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" isAnimationActive={false}>
+        <Line key="p50" type="monotone" dataKey="p50" stroke="#4ecdc4" strokeWidth={2} dot={false} activeDot={false} name="50th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('50th', '#4ecdc4')} position="right" />
         </Line>,
-        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" isAnimationActive={false}>
+        <Line key="p25" type="monotone" dataKey="p25" stroke="#95a5a6" strokeWidth={1} dot={false} activeDot={false} name="25th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('25th', '#95a5a6')} position="right" />
         </Line>,
-        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" isAnimationActive={false}>
+        <Line key="p15" type="monotone" dataKey="p15" stroke="#ffa500" strokeWidth={1} dot={false} activeDot={false} name="15th" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('15th', '#ffa500')} position="right" />
         </Line>,
-        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" isAnimationActive={false}>
+        <Line key="p3" type="monotone" dataKey="p3" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="3rd" isAnimationActive={false} connectNulls={true}>
           <LabelList content={createEndLabel('3rd', '#ff6b6b')} position="right" />
         </Line>,
       ]
@@ -1345,7 +1437,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               />
               <YAxis 
                 domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], null)}
-                label={{ value: 'Head Circumference (cm)', angle: -90, position: 'insideLeft' }} 
+                label={createYAxisLabel('Head Circumference (cm)')}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData.measurements, m => m.headCircumference)}
@@ -1420,7 +1512,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   />
                   <YAxis 
                     domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], null)}
-                    label={{ value: 'Arm Circumference (cm)', angle: -90, position: 'insideLeft' }} 
+                    label={createYAxisLabel('Arm Circumference (cm)')}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData.measurements, m => m.armCircumference)}
@@ -1452,7 +1544,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   />
                   <YAxis 
                     domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], null)}
-                    label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
+                    label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData.measurements, m => m.subscapularSkinfold)}
@@ -1484,7 +1576,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   />
                   <YAxis 
                     domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], null)}
-                    label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft' }} 
+                    label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData.measurements, m => m.tricepsSkinfold)}
