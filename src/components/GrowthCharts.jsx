@@ -285,8 +285,30 @@ function formatAgeLabel(ageYears) {
   }
 }
 
-function formatAgeTick(tickItem) {
-  return formatAgeLabel(parseFloat(tickItem))
+// Create a tick formatter that prevents duplicate consecutive labels
+// Each formatter instance maintains its own lastLabel state
+const createAgeTickFormatter = () => {
+  let lastLabel = null
+  let lastTickValue = null
+  
+  return (tickItem) => {
+    const tickValue = parseFloat(tickItem)
+    const label = formatAgeLabel(tickValue)
+    
+    // Reset if we're going backwards (new chart render starting from beginning)
+    if (lastTickValue != null && tickValue < lastTickValue) {
+      lastLabel = null
+    }
+    
+    if (label === lastLabel) {
+      lastTickValue = tickValue
+      return '' // Return empty string to hide duplicate
+    }
+    
+    lastLabel = label
+    lastTickValue = tickValue
+    return label
+  }
 }
 
 function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange }) {
@@ -656,28 +678,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Sort by age to ensure proper line connection
     chartData.sort((a, b) => a.ageYears - b.ageYears)
     
-    // Remove any duplicate age points (within 0.1 years) - keep the one with patient data if available
-    // This prevents duplicate x-axis labels
-    const deduplicated = []
-    const seenAges = new Set()
-    
-    chartData.forEach(item => {
-      // Round age to 2 decimal places for comparison
-      const roundedAge = Math.round(item.ageYears * 100) / 100
-      
-      if (!seenAges.has(roundedAge)) {
-        seenAges.add(roundedAge)
-        deduplicated.push(item)
-      } else {
-        // Merge with existing point - keep patient value if this item has one
-        const existing = deduplicated.find(d => Math.round(d.ageYears * 100) / 100 === roundedAge)
-        if (existing && item[valueKey] != null && existing[valueKey] == null) {
-          existing[valueKey] = item[valueKey]
-        }
-      }
-    })
-    
-    return deduplicated
+    // Keep all data points for accurate line drawing
+    // X-axis will handle duplicate labels via custom tick formatter
+    return chartData
   }, [])
 
   const prepareWeightHeightData = useCallback(() => {
@@ -886,22 +889,22 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const getSourceLabel = useCallback((source) => (source === 'cdc' ? 'CDC' : 'WHO'), [])
 
   const calculateAgeDomain = useCallback((measurements) => {
+    // Always start from 0 to show full reference curves
     if (!measurements || measurements.length === 0) return [0, 5] // Default to 0-5 years if no measurements
-    
+
     const ages = measurements.map(m => m.ageYears).filter(a => a != null)
     if (ages.length === 0) return [0, 5]
-    
-    const minAge = Math.min(...ages)
+
+    const minAge = 0 // Always start from 0, not from first measurement
     const maxAge = Math.max(...ages)
-    
-    // Add some padding before min for readability, but no padding after max so line reaches edge
+
+    // Add some padding after max for readability
     // For single measurements, ensure we show a reasonable range to see percentile curves
     const range = Math.max(maxAge - minAge, 0.5)
-    const leftPadding = range * 0.1
     const rightPadding = range * 0.1 // Add some padding on right too for single measurements
-    
+
     return [
-      Math.max(0, minAge - leftPadding),
+      minAge, // Always start from 0
       maxAge + rightPadding
     ]
   }, [])
@@ -923,6 +926,15 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Try setting max to 0 - Recharts might detect it's too small and auto-adjust
     return ['auto', 'auto']
   }, [])
+
+  // Create tick formatters for each chart to prevent duplicate labels
+  const wfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
+  const hfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
+  const hcfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
+  const bmifaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
+  const acfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
+  const ssfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
+  const tsfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
 
   const wfaChartDataRaw = useMemo(() => 
     prepareChartData(wfaData, patientData.measurements, 'patientWeight', m => m.weight),
@@ -1359,7 +1371,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 type="number"
                 scale="linear"
                 domain={ageDomain}
-                tickFormatter={formatAgeTick}
+                tickFormatter={wfaTickFormatter}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
@@ -1394,7 +1406,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 type="number"
                 scale="linear"
                 domain={ageDomain}
-                tickFormatter={formatAgeTick}
+                tickFormatter={hfaTickFormatter}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
@@ -1429,7 +1441,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 type="number"
                 scale="linear"
                 domain={ageDomain}
-                tickFormatter={formatAgeTick}
+                tickFormatter={hcfaTickFormatter}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
@@ -1464,7 +1476,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 type="number"
                 scale="linear"
                 domain={ageDomain}
-                tickFormatter={formatAgeTick}
+                tickFormatter={bmifaTickFormatter}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
@@ -1507,7 +1519,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     type="number"
                     scale="linear"
                     domain={ageDomain}
-                    tickFormatter={formatAgeTick}
+                    tickFormatter={acfaTickFormatter}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
@@ -1539,7 +1551,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     type="number"
                     scale="linear"
                     domain={ageDomain}
-                    tickFormatter={formatAgeTick}
+                    tickFormatter={ssfaTickFormatter}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
@@ -1571,7 +1583,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     type="number"
                     scale="linear"
                     domain={ageDomain}
-                    tickFormatter={formatAgeTick}
+                    tickFormatter={tsfaTickFormatter}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 

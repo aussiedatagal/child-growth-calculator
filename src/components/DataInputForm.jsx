@@ -27,7 +27,7 @@ const getPersonKey = (name, birthDate) => {
   return `${(name || '').trim()}_${birthDate || ''}`
 }
 
-function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange }) {
+function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange, onExportData, onImportData }) {
   const [showAddPersonForm, setShowAddPersonForm] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
   const [newPersonDOB, setNewPersonDOB] = useState('')
@@ -286,21 +286,79 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
   }
 
   const peopleList = Object.values(people || {})
+  const fileInputRef = useRef(null)
+  const personSelectRef = useRef(null)
+
+  const handleExportData = () => {
+    onExportData()
+  }
+
+  const handleImportData = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target.result)
+          onImportData(data)
+        } catch (error) {
+          alert('Error importing data: ' + error.message)
+        }
+      }
+      reader.readAsText(file)
+    }
+    // Reset input
+    e.target.value = ''
+  }
+
 
   return (
     <div className="data-input-form">
-      <h2>People</h2>
+      <h2 style={{ marginBottom: '1rem' }}>People</h2>
+
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".json"
+        style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+        onChange={handleImportData}
+      />
       
       <div className="form-group">
         <label htmlFor="personSelect">Select Person:</label>
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
           <select
             id="personSelect"
+            ref={personSelectRef}
             value={selectedPersonId || ''}
-            onChange={(e) => onSelectPerson(e.target.value || null)}
+            onChange={(e) => {
+              const value = e.target.value
+              if (value === '__add__') {
+                setShowAddPersonForm(true)
+                // Reset select to previous value
+                setTimeout(() => {
+                  if (personSelectRef.current) {
+                    personSelectRef.current.value = selectedPersonId || ''
+                  }
+                }, 0)
+              } else if (value === '__import__') {
+                fileInputRef.current?.click()
+                // Reset select to previous value
+                setTimeout(() => {
+                  if (personSelectRef.current) {
+                    personSelectRef.current.value = selectedPersonId || ''
+                  }
+                }, 0)
+              } else {
+                onSelectPerson(value || null)
+              }
+            }}
             style={{ flex: 1 }}
           >
-            <option value="">-- Select or Add Person --</option>
+            <option value="">-- Select Person --</option>
+            <option value="__add__">+ Add New Person</option>
+            <option value="__import__">📤 Import Data</option>
+            {peopleList.length > 0 && <option disabled>──────────</option>}
             {peopleList.map(person => (
               <option key={person.id} value={getPersonKey(person.name, person.birthDate)}>
                 {person.name || 'Unnamed'} {person.birthDate ? `(${new Date(person.birthDate).toLocaleDateString()})` : ''} - {person.measurements?.length || 0} measurements
@@ -325,25 +383,6 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
             </button>
           )}
         </div>
-        {!showAddPersonForm && (
-          <button
-            type="button"
-            onClick={() => setShowAddPersonForm(true)}
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              background: '#667eea',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              marginTop: '0.5rem'
-            }}
-          >
-            + Add New Person
-          </button>
-        )}
       </div>
 
       {showAddPersonForm && (
@@ -1059,6 +1098,24 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
           </div>
           <button onClick={onClearData} className="clear-btn" style={{ marginTop: '1rem' }}>
             Clear All Data
+          </button>
+          <button
+            type="button"
+            onClick={handleExportData}
+            style={{
+              marginTop: '0.5rem',
+              width: '100%',
+              padding: '0.5rem 1rem',
+              background: '#34a853',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.9rem'
+            }}
+            title="Download all data as JSON file"
+          >
+            📥 Download Data
           </button>
         </div>
       )}

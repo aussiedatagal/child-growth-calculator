@@ -392,6 +392,104 @@ function App() {
     }
   }
 
+  const handleExportData = () => {
+    const data = {
+      people,
+      selectedPersonId,
+      sources: referenceSources
+    }
+    const json = JSON.stringify(data, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const date = new Date().toISOString().split('T')[0]
+    a.download = `growth-charts-data-${date}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImportData = (data) => {
+    let firstNewPersonKey = null
+    let personToSelect = null
+    
+    if (data.people) {
+      // Merge with existing people
+      setPeople(prev => {
+        const merged = { ...prev }
+        Object.keys(data.people).forEach(key => {
+          if (merged[key]) {
+            // Merge measurements
+            const existing = merged[key]
+            const imported = data.people[key]
+            const existingMeasurements = existing.measurements || []
+            const importedMeasurements = imported.measurements || []
+            
+            // Create map by date to avoid duplicates
+            const measurementMap = new Map()
+            existingMeasurements.forEach(m => {
+              measurementMap.set(m.date, { ...m })
+            })
+            
+            // Merge imported measurements
+            importedMeasurements.forEach(m => {
+              const existing = measurementMap.get(m.date)
+              if (existing) {
+                // Merge non-conflicting fields
+                Object.keys(m).forEach(field => {
+                  if (existing[field] == null && m[field] != null) {
+                    existing[field] = m[field]
+                  }
+                })
+              } else {
+                measurementMap.set(m.date, { ...m })
+              }
+            })
+            
+            merged[key] = {
+              ...existing,
+              ...imported,
+              measurements: Array.from(measurementMap.values()).sort((a, b) => new Date(a.date) - new Date(b.date))
+            }
+          } else {
+            merged[key] = data.people[key]
+            // Track the first newly imported person
+            if (firstNewPersonKey === null) {
+              firstNewPersonKey = key
+            }
+          }
+        })
+        
+        // Determine which person to select
+        if (data.selectedPersonId && merged[data.selectedPersonId]) {
+          personToSelect = data.selectedPersonId
+        } else if (firstNewPersonKey) {
+          personToSelect = firstNewPersonKey
+        } else if (Object.keys(data.people).length > 0) {
+          personToSelect = Object.keys(data.people)[0]
+        }
+        
+        return merged
+      })
+      
+      // Select the person after people state is updated
+      if (personToSelect) {
+        setSelectedPersonId(personToSelect)
+      }
+    } else {
+      // No people in import, but might have selectedPersonId
+      if (data.selectedPersonId && people[data.selectedPersonId]) {
+        setSelectedPersonId(data.selectedPersonId)
+      }
+    }
+    
+    if (data.sources) {
+      setReferenceSources(data.sources)
+    }
+  }
+
   return (
     <div className="app">
       <header className="app-header">
@@ -428,6 +526,8 @@ function App() {
               onClearData={handleClearData}
               referenceSources={referenceSources}
               onReferenceSourcesChange={setReferenceSources}
+              onExportData={handleExportData}
+              onImportData={handleImportData}
             />
           </section>
 
