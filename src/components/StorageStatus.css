@@ -1,0 +1,78 @@
+.storage-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.storage-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.storage-icon {
+  font-size: 1.25rem;
+}
+
+.storage-note {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-style: italic;
+}
+
+.storage-button {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.storage-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.storage-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.storage-button.sign-in {
+  background: #4285f4;
+  border-color: #4285f4;
+}
+
+.storage-button.sign-in:hover:not(:disabled) {
+  background: #357ae8;
+  border-color: #357ae8;
+}
+
+.storage-button.sign-out {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.storage-button.sign-out:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (max-width: 768px) {
+  .storage-status {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .storage-button {
+    width: 100%;
+  }
+}
