@@ -587,10 +587,19 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   const renderBoxPlot = (data) => {
     if (!data) return null
 
-    const range = data.max - data.min
+    // Calculate range including patient value to ensure marker is visible
+    const percentileMin = data.min
+    const percentileMax = data.max
+    const patientValue = data.patient
+    
+    // Determine the actual min and max values to display (including patient if outside bounds)
+    const displayMin = Math.min(percentileMin, patientValue)
+    const displayMax = Math.max(percentileMax, patientValue)
+    
+    const range = displayMax - displayMin
     const padding = Math.max(range * 0.1, 0.5) 
-    const yMax = data.max + padding
-    const yMin = Math.max(0, data.min - padding)
+    const yMax = displayMax + padding
+    const yMin = Math.max(0, displayMin - padding)
     const totalRange = yMax - yMin
     const scale = totalRange > 0 ? 180 / totalRange : 1
 
