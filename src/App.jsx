@@ -539,6 +539,7 @@ function App() {
             <GrowthCharts 
               patientData={patientData} 
               referenceSources={referenceSources}
+              onReferenceSourcesChange={handleReferenceSourcesChange}
             />
             
             {patientData && patientData?.measurements && patientData?.measurements.length > 0 && (
