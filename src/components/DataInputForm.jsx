@@ -46,10 +46,9 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
 
   const [formData, setFormData] = useState(getInitialFormData())
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [editingIndex, setEditingIndex] = useState(null)
-  const [inlineEditingIndex, setInlineEditingIndex] = useState(null)
+  const [inlineEditingId, setInlineEditingId] = useState(null)
   const [inlineEditData, setInlineEditData] = useState(null)
-  const [expandedRows, setExpandedRows] = useState(new Set())
+  const [expandedRows, setExpandedRows] = useState(new Set()) // Stores measurement IDs
   const [showPatientInfo, setShowPatientInfo] = useState(false)
   
   // Auto-expand patient info when a person is selected and data is available
@@ -74,21 +73,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       clearTimeout(debounceTimerRef.current)
       debounceTimerRef.current = null
     }
-    if (editingIndex !== null && patientData.measurements && patientData.measurements[editingIndex]) {
-      const m = patientData.measurements[editingIndex]
-      setFormData({
-        date: m.date || new Date().toISOString().split('T')[0],
-        height: m.height ? String(m.height) : '',
-        weight: m.weight ? String(m.weight) : '',
-        headCircumference: m.headCircumference ? String(m.headCircumference) : '',
-        armCircumference: m.armCircumference ? String(m.armCircumference) : '',
-        subscapularSkinfold: m.subscapularSkinfold ? String(m.subscapularSkinfold) : '',
-        tricepsSkinfold: m.tricepsSkinfold ? String(m.tricepsSkinfold) : ''
-      })
-    } else {
-      setFormData(getInitialFormData())
-    }
-  }, [editingIndex, patientData.measurements])
+    setFormData(getInitialFormData())
+  }, [patientData.measurements])
 
   useEffect(() => {
     return () => {
@@ -167,20 +153,13 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       tricepsSkinfold: newFormData.tricepsSkinfold ? parseFloat(newFormData.tricepsSkinfold) : null
     }
 
-    if (editingIndex !== null) {
-      onUpdateMeasurement(editingIndex, measurement)
-      setEditingIndex(null)
-      setShowAddMeasurementForm(false)
-    } else {
-      onAddMeasurement(measurement)
-      setFormData(getInitialFormData())
-      setShowAddMeasurementForm(false)
-    }
+    onAddMeasurement(measurement)
+    setFormData(getInitialFormData())
+    setShowAddMeasurementForm(false)
   }
 
-  const handleEditMeasurement = (index) => {
-    const measurement = patientData.measurements[index]
-    setInlineEditingIndex(index)
+  const handleEditMeasurement = (measurement) => {
+    setInlineEditingId(measurement.id)
     setInlineEditData({
       date: measurement.date,
       height: measurement.height ? String(measurement.height) : '',
@@ -189,6 +168,13 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       armCircumference: measurement.armCircumference ? String(measurement.armCircumference) : '',
       subscapularSkinfold: measurement.subscapularSkinfold ? String(measurement.subscapularSkinfold) : '',
       tricepsSkinfold: measurement.tricepsSkinfold ? String(measurement.tricepsSkinfold) : ''
+    })
+    
+    // Also expand the row so the edit form is visible
+    setExpandedRows(prev => {
+      const newExpanded = new Set(prev)
+      newExpanded.add(measurement.id)
+      return newExpanded
     })
   }
 
@@ -199,7 +185,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
     }))
   }
 
-  const handleSaveInlineEdit = (index) => {
+  const handleSaveInlineEdit = (id) => {
     if (!inlineEditData) return
     
     if (!patientData.birthDate) {
@@ -241,7 +227,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
     }
 
     const duplicateIndex = patientData.measurements.findIndex(
-      (m, i) => i !== index && m.date === measurement.date
+      (m) => m.id !== id && m.date === measurement.date
     )
     
     if (duplicateIndex >= 0) {
@@ -249,19 +235,14 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       return
     }
 
-    onUpdateMeasurement(index, measurement)
-    setInlineEditingIndex(null)
+    onUpdateMeasurement(id, measurement)
+    setInlineEditingId(null)
     setInlineEditData(null)
   }
 
   const handleCancelInlineEdit = () => {
-    setInlineEditingIndex(null)
+    setInlineEditingId(null)
     setInlineEditData(null)
-  }
-
-  const handleCancelEdit = () => {
-    setEditingIndex(null)
-    setFormData(getInitialFormData())
   }
 
   const handleInputChange = (e) => {
@@ -640,12 +621,11 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                 marginBottom: '1.5rem'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <h2 style={{ margin: 0, fontSize: '1.2rem', borderBottom: 'none' }}>{editingIndex !== null ? 'Edit Measurement' : 'Add Measurement'}</h2>
+                  <h2 style={{ margin: 0, fontSize: '1.2rem', borderBottom: 'none' }}>Add Measurement</h2>
                   <button
                     type="button"
                     onClick={() => {
                       setShowAddMeasurementForm(false)
-                      setEditingIndex(null)
                       setFormData(getInitialFormData())
                     }}
                     style={{
@@ -802,13 +782,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
 
                   <div className="form-group" style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
                     <button type="submit" className="submit-btn" style={{ flex: 1 }}>
-                      {editingIndex !== null ? 'Update Measurement' : 'Add Measurement'}
+                      Add Measurement
                     </button>
-                    {editingIndex !== null && (
-                      <button type="button" onClick={handleCancelEdit} className="clear-btn" style={{ flex: 1, background: '#95a5a6' }}>
-                        Cancel
-                      </button>
-                    )}
                   </div>
                 </form>
               </div>
@@ -816,22 +791,23 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
 
             {patientData && patientData.measurements && patientData.measurements.length > 0 && (
               <div className="measurements-expandable">
-                {patientData.measurements.map((m, index) => {
-                  const isExpanded = expandedRows.has(index)
-                  const isEditing = inlineEditingIndex === index
+                {patientData.measurements.map((m) => {
+                  const mId = m.id || `${m.date}_${m.ageYears}`
+                  const isExpanded = expandedRows.has(mId)
+                  const isEditing = inlineEditingId === mId
                   const editData = isEditing ? inlineEditData : null
                   const hasAdvanced = m.armCircumference || m.subscapularSkinfold || m.tricepsSkinfold
                   
                   return (
-                    <div key={index} className="measurement-item">
+                    <div key={mId} className="measurement-item">
                       <div 
                         className="measurement-summary"
                         onClick={() => {
                           const newExpanded = new Set(expandedRows)
                           if (isExpanded) {
-                            newExpanded.delete(index)
+                            newExpanded.delete(mId)
                           } else {
-                            newExpanded.add(index)
+                            newExpanded.add(mId)
                           }
                           setExpandedRows(newExpanded)
                         }}
@@ -865,7 +841,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation()
-                                handleEditMeasurement(index)
+                                handleEditMeasurement(m)
                               }}
                               style={{ 
                                 padding: '0.25rem 0.5rem', 
@@ -883,7 +859,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               onClick={(e) => {
                                 e.stopPropagation()
                                 if (confirm('Delete this measurement?')) {
-                                  onDeleteMeasurement(index)
+                                  onDeleteMeasurement(mId)
                                 }
                               }}
                               style={{
@@ -1048,7 +1024,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                             {isEditing ? (
                               <>
                                 <button 
-                                  onClick={() => handleSaveInlineEdit(index)}
+                                  onClick={() => handleSaveInlineEdit(mId)}
                                   style={{ 
                                     padding: '0.5rem 1rem', 
                                     background: '#667eea', 
@@ -1079,7 +1055,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                             ) : (
                               <>
                                 <button 
-                                  onClick={() => handleEditMeasurement(index)}
+                                  onClick={() => handleEditMeasurement(m)}
                                   style={{ 
                                     padding: '0.5rem 1rem', 
                                     background: '#667eea', 
@@ -1095,7 +1071,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                 <button 
                                   onClick={() => {
                                     if (confirm('Delete this measurement?')) {
-                                      onDeleteMeasurement(index)
+                                      onDeleteMeasurement(mId)
                                     }
                                   }}
                                   style={{

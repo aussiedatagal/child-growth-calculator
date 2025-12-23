@@ -14,6 +14,41 @@ const getPersonKey = (name, birthDate) => {
   return `${(name || '').trim()}_${birthDate || ''}`
 }
 
+const calculateAge = (birthDate, measurementDate) => {
+  if (!birthDate || !measurementDate) return null
+  
+  const birth = new Date(birthDate)
+  const measure = new Date(measurementDate)
+  const diffTime = measure - birth
+  const diffDays = diffTime / (1000 * 60 * 60 * 24)
+  const years = diffDays / 365.25
+  const months = years * 12
+  
+  return { years, months, days: diffDays }
+}
+
+// Helper to recalculate all measurement ages for a person
+const recalculatePersonAges = (person) => {
+  if (!person || !person.birthDate || !person.measurements) return person
+  
+  const updatedMeasurements = person.measurements.map(m => {
+    if (m.date) {
+      const age = calculateAge(person.birthDate, m.date)
+      return {
+        ...m,
+        ageYears: age ? age.years : m.ageYears,
+        ageMonths: age ? age.months : m.ageMonths
+      }
+    }
+    return m
+  })
+  
+  return {
+    ...person,
+    measurements: updatedMeasurements
+  }
+}
+
 function App() {
   const [people, setPeople] = useState(() => {
     const saved = localStorage.getItem('growthChartPeople')
@@ -24,18 +59,38 @@ function App() {
         if (parsed.name || parsed.gender || parsed.birthDate || parsed.measurements) {
           // Old single-person format - convert to new format
           const personKey = getPersonKey(parsed.name, parsed.birthDate)
+          const rawMeasurements = parsed.measurements || (parsed.measurement ? [parsed.measurement] : [])
+          
+          // Ensure measurements have IDs
+          const measurements = rawMeasurements.map(m => ({
+            ...m,
+            id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+          }))
+
           const migratedPeople = {
             [personKey]: {
               id: getPersonId(parsed.name, parsed.birthDate),
               name: parsed.name || '',
               gender: parsed.gender || '',
               birthDate: parsed.birthDate || '',
-              measurements: parsed.measurements || (parsed.measurement ? [parsed.measurement] : [])
+              measurements: measurements
             }
           }
           return migratedPeople
         }
-        return parsed
+        
+        // Ensure all people in the new format have IDs for their measurements
+        const migratedPeople = { ...parsed }
+        Object.keys(migratedPeople).forEach(key => {
+          const person = migratedPeople[key]
+          if (person.measurements) {
+            person.measurements = person.measurements.map(m => ({
+              ...m,
+              id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+            }))
+          }
+        })
+        return migratedPeople
       } catch (e) {
         console.error('Error loading saved people:', e)
       }
@@ -46,18 +101,6 @@ function App() {
   const [selectedPersonId, setSelectedPersonId] = useState(() => {
     const saved = localStorage.getItem('growthChartSelectedPerson')
     return saved || null
-  })
-
-  const [patientData, setPatientData] = useState(() => {
-    if (selectedPersonId && people[selectedPersonId]) {
-      return people[selectedPersonId]
-    }
-    return {
-      name: '',
-      gender: '',
-      birthDate: '',
-      measurements: []
-    }
   })
 
   const [referenceSources, setReferenceSources] = useState(() => {
@@ -74,60 +117,50 @@ function App() {
     return { age: 'who', wfh: 'who' }
   })
 
-  // Get the selected person's measurements count for dependency tracking
-  const selectedPersonMeasurements = selectedPersonId && people[selectedPersonId] 
-    ? (Array.isArray(people[selectedPersonId].measurements) ? people[selectedPersonId].measurements : [])
-    : []
-  const measurementsKey = `${selectedPersonId}_${selectedPersonMeasurements.length}_${JSON.stringify(selectedPersonMeasurements.map(m => m.date))}`
-  
-  // Update patientData when selectedPersonId or people change
-  useEffect(() => {
+  // Derived patient data - recalculate ages on the fly
+  const patientData = useMemo(() => {
     if (selectedPersonId) {
       let person = people[selectedPersonId]
       
-      // If person not found by key, try to find by ID (fallback for edge cases)
-      if (!person && selectedPersonId) {
-        const foundPerson = Object.values(people).find(p => {
-          const personKey = getPersonKey(p.name, p.birthDate)
-          return personKey === selectedPersonId
-        })
-        if (foundPerson) {
-          person = foundPerson
-        }
+      // Fallback: If person not found by key, try to find by ID (rare edge cases)
+      if (!person) {
+        person = Object.values(people).find(p => p.id === selectedPersonId)
       }
       
       if (person) {
-        // Use the person object directly, ensuring measurements array exists
         const measurements = Array.isArray(person.measurements) ? person.measurements : []
-        // Always update to ensure we have the latest data
-        setPatientData({
+        
+        // Recalculate ages based on current birthDate
+        const updatedMeasurements = measurements.map(m => {
+          if (person.birthDate && m.date) {
+            const age = calculateAge(person.birthDate, m.date)
+            return {
+              ...m,
+              ageYears: age ? age.years : m.ageYears,
+              ageMonths: age ? age.months : m.ageMonths
+            }
+          }
+          return m
+        })
+
+        return {
           ...person,
-          measurements: measurements
-        })
-      } else {
-        // Person ID is set but person doesn't exist in people - reset patientData
-        setPatientData({
-          name: '',
-          gender: '',
-          birthDate: '',
-          measurements: []
-        })
+          measurements: updatedMeasurements
+        }
       }
-    } else {
-      setPatientData({
-        name: '',
-        gender: '',
-        birthDate: '',
-        measurements: []
-      })
     }
-  }, [selectedPersonId, people, measurementsKey])
+    
+    return {
+      name: '',
+      gender: '',
+      birthDate: '',
+      measurements: []
+    }
+  }, [selectedPersonId, people])
 
   // Save people to localStorage whenever they change
   useEffect(() => {
-    if (Object.keys(people).length > 0) {
-      localStorage.setItem('growthChartPeople', JSON.stringify(people))
-    }
+    localStorage.setItem('growthChartPeople', JSON.stringify(people))
   }, [people])
 
   // Save selected person ID
@@ -193,46 +226,58 @@ function App() {
     
     const personKey = getPersonKey(newData.name, newData.birthDate)
     
-    // If name or DOB changed, we might need to update the key
+    // Case 1: Name/DOB changed to match ANOTHER existing person
     if (personKey !== selectedPersonId && people[personKey]) {
-      // Person with this name/DOB already exists - merge measurements
+      // Merge measurements with the other person
       const existing = people[personKey]
       const mergedMeasurements = [...(existing.measurements || []), ...(newData.measurements || [])]
       mergedMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
       
-      setPeople(prev => ({
-        ...prev,
-        [personKey]: {
-          ...existing,
-          ...newData,
-          measurements: mergedMeasurements
-        }
-      }))
+      const updatedPerson = recalculatePersonAges({
+        ...existing,
+        ...newData,
+        measurements: mergedMeasurements
+      })
       
-      // Remove old entry if key changed
-      if (selectedPersonId !== personKey) {
-        setPeople(prev => {
-          const updated = { ...prev }
+      setPeople(prev => {
+        const updated = { ...prev }
+        updated[personKey] = updatedPerson
+        // Remove old entry if key changed
+        if (selectedPersonId !== personKey) {
           delete updated[selectedPersonId]
-          return updated
-        })
-      }
+        }
+        return updated
+      })
       
       setSelectedPersonId(personKey)
-    } else {
-      // Update existing person - preserve measurements if not provided in newData
+    } 
+    // Case 2: Name/DOB changed to something that doesn't exist yet, OR didn't change name/DOB
+    else {
       setPeople(prev => {
         const existing = prev[selectedPersonId]
-        return {
-          ...prev,
-          [selectedPersonId]: {
-            ...existing,
-            ...newData,
-            // Explicitly preserve measurements if they exist and aren't being updated
-            measurements: newData.measurements !== undefined ? newData.measurements : (existing?.measurements || [])
-          }
+        if (!existing) return prev
+
+        const updatedPerson = recalculatePersonAges({
+          ...existing,
+          ...newData,
+          measurements: newData.measurements !== undefined ? newData.measurements : (existing?.measurements || [])
+        })
+        
+        const updated = { ...prev }
+        if (personKey !== selectedPersonId) {
+          // Key changed - move to new key and delete old one
+          updated[personKey] = updatedPerson
+          delete updated[selectedPersonId]
+        } else {
+          // Key stayed same
+          updated[selectedPersonId] = updatedPerson
         }
+        return updated
       })
+
+      if (personKey !== selectedPersonId) {
+        setSelectedPersonId(personKey)
+      }
     }
   }
 
@@ -245,9 +290,15 @@ function App() {
       
       const existingMeasurements = person.measurements || []
       
+      // Ensure the new measurement has a unique ID if it doesn't already
+      const measurementWithId = {
+        ...measurement,
+        id: measurement.id || `${measurement.date}_${Math.random().toString(36).substr(2, 9)}`
+      }
+      
       // Check for duplicate date
       const existingIndex = existingMeasurements.findIndex(
-        m => m.date === measurement.date
+        m => m.date === measurementWithId.date
       )
       
       if (existingIndex >= 0) {
@@ -259,7 +310,7 @@ function App() {
         const fields = ['height', 'weight', 'headCircumference', 'armCircumference', 'subscapularSkinfold', 'tricepsSkinfold']
         fields.forEach(field => {
           const existingVal = existing[field]
-          const newVal = measurement[field]
+          const newVal = measurementWithId[field]
           
           if (existingVal != null && newVal != null && existingVal !== newVal) {
             conflicts.push({
@@ -282,13 +333,13 @@ function App() {
         // Merge measurements (new values override nulls, but don't override existing non-null values)
         const merged = { ...existing }
         fields.forEach(field => {
-          if (merged[field] == null && measurement[field] != null) {
-            merged[field] = measurement[field]
+          if (merged[field] == null && measurementWithId[field] != null) {
+            merged[field] = measurementWithId[field]
           }
         })
         // Update age if provided
-        if (measurement.ageYears != null) merged.ageYears = measurement.ageYears
-        if (measurement.ageMonths != null) merged.ageMonths = measurement.ageMonths
+        if (measurementWithId.ageYears != null) merged.ageYears = measurementWithId.ageYears
+        if (measurementWithId.ageMonths != null) merged.ageMonths = measurementWithId.ageMonths
         
         const newMeasurements = [...existingMeasurements]
         newMeasurements[existingIndex] = merged
@@ -303,7 +354,7 @@ function App() {
       }
       
       // New measurement - add it
-      const newMeasurements = [...existingMeasurements, measurement]
+      const newMeasurements = [...existingMeasurements, measurementWithId]
       // Sort by date
       newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
       
@@ -317,7 +368,7 @@ function App() {
     })
   }
 
-  const handleUpdateMeasurement = (index, measurement) => {
+  const handleUpdateMeasurement = (id, measurement) => {
     if (!selectedPersonId) return
     
     setPeople(prev => {
@@ -325,10 +376,13 @@ function App() {
       if (!person) return prev
       
       const existingMeasurements = person.measurements || []
+      const index = existingMeasurements.findIndex(m => m.id === id)
       
-      // Check for duplicate date (excluding current index)
+      if (index === -1) return prev
+      
+      // Check for duplicate date (excluding current ID)
       const duplicateIndex = existingMeasurements.findIndex(
-        (m, i) => i !== index && m.date === measurement.date
+        (m, i) => m.id !== id && m.date === measurement.date
       )
       
       if (duplicateIndex >= 0) {
@@ -368,9 +422,10 @@ function App() {
         if (measurement.ageYears != null) merged.ageYears = measurement.ageYears
         if (measurement.ageMonths != null) merged.ageMonths = measurement.ageMonths
         
-        // Remove the current index and update the duplicate index
-        const newMeasurements = existingMeasurements.filter((_, i) => i !== index)
-        newMeasurements[duplicateIndex > index ? duplicateIndex - 1 : duplicateIndex] = merged
+        // Remove the current measurement and update the duplicate one
+        const newMeasurements = existingMeasurements.filter((m) => m.id !== id)
+        const newDuplicateIndex = newMeasurements.findIndex(m => m.id === existing.id)
+        newMeasurements[newDuplicateIndex] = merged
         newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
         
         return {
@@ -384,7 +439,7 @@ function App() {
       
       // No duplicate - update normally
       const newMeasurements = [...existingMeasurements]
-      newMeasurements[index] = measurement
+      newMeasurements[index] = { ...measurement, id } // Ensure ID is preserved
       // Sort by date
       newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
       
@@ -398,15 +453,14 @@ function App() {
     })
   }
 
-  const handleDeleteMeasurement = (index) => {
+  const handleDeleteMeasurement = (id) => {
     if (!selectedPersonId) return
     
     setPeople(prev => {
       const person = prev[selectedPersonId]
       if (!person) return prev
       
-      const newMeasurements = [...(person.measurements || [])]
-      newMeasurements.splice(index, 1)
+      const newMeasurements = (person.measurements || []).filter(m => m.id !== id)
       
       return {
         ...prev,
@@ -465,7 +519,11 @@ function App() {
             const existing = merged[key]
             const imported = data.people[key]
             const existingMeasurements = existing.measurements || []
-            const importedMeasurements = imported.measurements || []
+            // Ensure imported measurements have IDs
+            const importedMeasurements = (imported.measurements || []).map(m => ({
+              ...m,
+              id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+            }))
             
             // Create map by date to avoid duplicates
             const measurementMap = new Map()
@@ -488,13 +546,15 @@ function App() {
               }
             })
             
-            merged[key] = {
+            const mergedMeasurements = Array.from(measurementMap.values()).sort((a, b) => new Date(a.date) - new Date(b.date))
+            
+            merged[key] = recalculatePersonAges({
               ...existing,
               ...imported,
-              measurements: Array.from(measurementMap.values()).sort((a, b) => new Date(a.date) - new Date(b.date))
-            }
+              measurements: mergedMeasurements
+            })
           } else {
-            merged[key] = data.people[key]
+            merged[key] = recalculatePersonAges(data.people[key])
             // Track the first newly imported person
             if (firstNewPersonKey === null) {
               firstNewPersonKey = key
