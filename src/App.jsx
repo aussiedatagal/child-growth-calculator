@@ -572,19 +572,17 @@ function App() {
           </section>
 
           <section className="charts-section">
-            {patientData.measurements && patientData.measurements.length > 0 && patientData.gender && (
-              <>
-                <GrowthCharts
-                  patientData={patientData}
-                  referenceSources={referenceSources}
-                  onReferenceSourcesChange={setReferenceSources}
-                />
-                <BoxWhiskerPlots
-                  patientData={patientData}
-                  referenceSources={referenceSources}
-                  onReferenceSourcesChange={setReferenceSources}
-                />
-              </>
+            <GrowthCharts
+              patientData={patientData}
+              referenceSources={referenceSources}
+              onReferenceSourcesChange={setReferenceSources}
+            />
+            {patientData.gender && patientData.measurements && patientData.measurements.length > 0 && (
+              <BoxWhiskerPlots
+                patientData={patientData}
+                referenceSources={referenceSources}
+                onReferenceSourcesChange={setReferenceSources}
+              />
             )}
           </section>
         </div>

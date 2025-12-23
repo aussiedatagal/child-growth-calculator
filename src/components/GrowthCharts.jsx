@@ -324,17 +324,15 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const [isRendering, setIsRendering] = useState(true)
 
   useEffect(() => {
-    if (patientData.gender && patientData.measurements && patientData.measurements.length > 0) {
-      loadReferenceData()
-    } else {
-      setLoading(false)
-    }
-  }, [patientData.gender, patientData.measurements, referenceSources?.age])
+    // Always load reference data, defaulting to 'male' if no gender is selected,
+    // so charts can show full curves even before a person is added.
+    loadReferenceData()
+  }, [patientData.gender, referenceSources?.age])
 
-      const loadReferenceData = async () => {
+  const loadReferenceData = async () => {
     setLoading(true)
     try {
-      const gKey = genderToKey(patientData.gender)
+      const gKey = genderToKey(patientData.gender || 'male')
       const ageSource = referenceSources?.age || 'who'
       const baseUrl = import.meta.env.BASE_URL
 
@@ -684,12 +682,18 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   }, [])
 
   const prepareWeightHeightData = useCallback(() => {
-    if (!weightHeightData || !patientData.measurements || patientData.measurements.length === 0) return []
+    if (!weightHeightData) return []
     
+    // Always start with reference data
     const chartData = weightHeightData.map(ref => ({
       ...ref,
       patientWeight: null
     }))
+    
+    // If no measurements, just return the reference data (curves will show)
+    if (!patientData.measurements || patientData.measurements.length === 0) {
+      return chartData
+    }
     
     // Add all measurement points
     patientData.measurements.forEach(measurement => {
@@ -1321,7 +1325,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
 
   // Handle rendering state - show spinner while charts are being prepared
   useEffect(() => {
-    if (!loading && patientData.gender && patientData.measurements && patientData.measurements.length > 0 && (wfaData || hfaData || hcfaData)) {
+    if (!loading && (wfaData || hfaData || hcfaData)) {
       // Small delay to allow React to render, then hide spinner
       const timer = setTimeout(() => {
         setIsRendering(false)
@@ -1330,12 +1334,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     } else {
       setIsRendering(true)
     }
-  }, [loading, patientData.gender, patientData.measurements, wfaData, hfaData, hcfaData])
+  }, [loading, wfaData, hfaData, hcfaData])
 
   // Early returns after all hooks
   if (loading) return <div className="loading">Loading reference data...</div>
-  if (!patientData.gender) return <div className="no-data">Please select gender to view growth charts</div>
-  if (!patientData.measurements || !Array.isArray(patientData.measurements) || patientData.measurements.length === 0) return <div className="no-data">Please add a measurement to view growth charts</div>
   if (!wfaData && !hfaData && !hcfaData) return <div className="no-data">No reference data available</div>
 
   // Determine age label based on max age in measurements
@@ -1374,7 +1376,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         <h3 className="section-header">Age-based Charts</h3>
         
         {/* 1. Weight-for-Age */}
-      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.weight) && (
+      {wfaChartData && wfaChartData.length > 0 && (
         <div className="chart-container">
           <h3>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           {isRendering ? (
@@ -1413,7 +1415,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       )}
 
       {/* 2. Height-for-Age */}
-      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.height) && (
+      {hfaChartData && hfaChartData.length > 0 && (
         <div className="chart-container">
           <h3>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           {isRendering ? (
@@ -1448,7 +1450,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       )}
 
       {/* 4. Head Circumference-for-Age */}
-      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.headCircumference) && (hcfaData?.[0]?.hcP50 != null) && (
+      {hcfaChartData && hcfaChartData.length > 0 && (hcfaData?.[0]?.hcP50 != null) && (
         <div className="chart-container">
           <h3>Head Circumference-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
           {isRendering ? (
@@ -1483,7 +1485,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       )}
 
       {/* 5. BMI-for-Age (WHO only) */}
-      {referenceSources?.age === 'who' && patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.weight && m.height) && bmifaData && bmifaData.length > 0 && (
+      {referenceSources?.age === 'who' && bmifaChartData && bmifaChartData.length > 0 && (
         <div className="chart-container">
           <h3>BMI-for-Age <span className="chart-source">(WHO)</span></h3>
           {isRendering ? (
@@ -1624,7 +1626,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       )}
 
       {/* Weight-for-Height Section */}
-      {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.height && m.weight) && whChartData.length > 0 && (
+      {whChartData && whChartData.length > 0 && (
         <div className="chart-section">
           <h3 className="section-header">Weight-for-Height</h3>
           
