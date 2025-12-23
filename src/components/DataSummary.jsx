@@ -18,11 +18,11 @@ function formatAge(ageYears) {
 }
 
 function DataSummary({ patientData }) {
-  if (!patientData.measurements || patientData.measurements.length === 0) {
+  if (!patientData?.measurements || patientData?.measurements.length === 0) {
     return null // Don't show anything if no measurements
   }
 
-  const measurements = patientData.measurements
+  const measurements = patientData?.measurements || []
   const latest = measurements[measurements.length - 1]
 
   return (

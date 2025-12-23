@@ -299,12 +299,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     // Always load reference data, defaulting to 'male' if no gender is selected,
     // so charts can show full curves even before a person is added.
     loadReferenceData()
-  }, [patientData.gender, referenceSources?.age])
+  }, [patientData?.gender, referenceSources?.age])
 
   const loadReferenceData = async () => {
     setLoading(true)
     try {
-      const gKey = genderToKey(patientData.gender || 'male')
+      const gKey = genderToKey(patientData?.gender || 'male')
       const ageSource = referenceSources?.age || 'who'
       const baseUrl = import.meta.env.BASE_URL
 
@@ -670,12 +670,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }))
     
     // If no measurements, just return the reference data (curves will show)
-    if (!patientData.measurements || patientData.measurements.length === 0) {
+    if (!patientData?.measurements || patientData?.measurements.length === 0) {
       return chartData
     }
     
     // Add all measurement points
-    patientData.measurements.forEach(measurement => {
+    patientData?.measurements.forEach(measurement => {
       if (!measurement.height || !measurement.weight) return
       
       const patientHeight = measurement.height
@@ -717,7 +717,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     })
     
     return deduplicated
-  }, [weightHeightData, patientData.measurements])
+  }, [weightHeightData, patientData?.measurements])
 
   const getClosestRefByAge = useCallback((data, ageYears) => {
     if (!data || ageYears == null) return null
@@ -939,7 +939,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       .filter((v, i, a) => i === 0 || Math.abs(v.ageYears - a[i-1].ageYears) > 0.0001)
   }, [])
 
-  const ageDomain = useMemo(() => calculateAgeDomain(patientData.measurements), [calculateAgeDomain, patientData.measurements])
+  const ageDomain = useMemo(() => calculateAgeDomain(patientData?.measurements), [calculateAgeDomain, patientData?.measurements])
   
   const filterDataByAge = useCallback((data) => {
     if (!data) return []
@@ -967,35 +967,35 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const tsfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
 
   const wfaChartDataRaw = useMemo(() => 
-    prepareChartData(wfaData, patientData.measurements, 'patientWeight', m => m.weight),
-    [prepareChartData, wfaData, patientData.measurements]
+    prepareChartData(wfaData, patientData?.measurements, 'patientWeight', m => m.weight),
+    [prepareChartData, wfaData, patientData?.measurements]
   )
   const hfaChartDataRaw = useMemo(() => 
-    prepareChartData(hfaData, patientData.measurements, 'patientHeight', m => m.height),
-    [prepareChartData, hfaData, patientData.measurements]
+    prepareChartData(hfaData, patientData?.measurements, 'patientHeight', m => m.height),
+    [prepareChartData, hfaData, patientData?.measurements]
   )
   const hcfaChartDataRaw = useMemo(() => 
-    prepareChartData(hcfaData, patientData.measurements, 'patientHC', m => m.headCircumference),
-    [prepareChartData, hcfaData, patientData.measurements]
+    prepareChartData(hcfaData, patientData?.measurements, 'patientHC', m => m.headCircumference),
+    [prepareChartData, hcfaData, patientData?.measurements]
   )
   const bmifaChartDataRaw = useMemo(() => {
-    const measurementsWithBMI = patientData.measurements?.map(m => ({
+    const measurementsWithBMI = patientData?.measurements?.map(m => ({
       ...m,
       bmi: calculateBMI(m.weight, m.height)
     })) || []
     return prepareChartData(bmifaData, measurementsWithBMI, 'patientBMI', m => m.bmi)
-  }, [prepareChartData, bmifaData, patientData.measurements, calculateBMI])
+  }, [prepareChartData, bmifaData, patientData?.measurements, calculateBMI])
   const acfaChartDataRaw = useMemo(() => 
-    prepareChartData(acfaData, patientData.measurements, 'patientACFA', m => m.armCircumference),
-    [prepareChartData, acfaData, patientData.measurements]
+    prepareChartData(acfaData, patientData?.measurements, 'patientACFA', m => m.armCircumference),
+    [prepareChartData, acfaData, patientData?.measurements]
   )
   const ssfaChartDataRaw = useMemo(() => 
-    prepareChartData(ssfaData, patientData.measurements, 'patientSSFA', m => m.subscapularSkinfold),
-    [prepareChartData, ssfaData, patientData.measurements]
+    prepareChartData(ssfaData, patientData?.measurements, 'patientSSFA', m => m.subscapularSkinfold),
+    [prepareChartData, ssfaData, patientData?.measurements]
   )
   const tsfaChartDataRaw = useMemo(() => 
-    prepareChartData(tsfaData, patientData.measurements, 'patientTSFA', m => m.tricepsSkinfold),
-    [prepareChartData, tsfaData, patientData.measurements]
+    prepareChartData(tsfaData, patientData?.measurements, 'patientTSFA', m => m.tricepsSkinfold),
+    [prepareChartData, tsfaData, patientData?.measurements]
   )
   const whChartData = useMemo(() => prepareWeightHeightData(), [prepareWeightHeightData])
   
@@ -1354,7 +1354,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     
     return renderAllPercentiles(insertAt)
-  }, [getWeightForHeightPercentile, getNumericPercentile, patientData.measurements])
+  }, [getWeightForHeightPercentile, getNumericPercentile, patientData?.measurements])
 
   // Handle rendering state - show spinner while charts are being prepared
   useEffect(() => {
@@ -1374,7 +1374,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   if (!wfaData && !hfaData && !hcfaData) return <div className="no-data">No reference data available</div>
 
   // Determine age label based on max age in measurements
-  const maxAge = patientData.measurements.reduce((max, m) => Math.max(max, m.ageYears || 0), 0)
+  const maxAge = (patientData?.measurements || []).reduce((max, m) => Math.max(max, m.ageYears || 0), 0)
   const ageLabel = maxAge < 2 ? 'Age (Months)' : 'Age (Years)'
 
   return (
@@ -1441,7 +1441,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData.measurements, m => m.weight)}
+              {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData?.measurements, m => m.weight)}
             </LineChart>
           </ResponsiveContainer>
           </div>
@@ -1478,7 +1478,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} 
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData.measurements, m => m.height)}
+              {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData?.measurements, m => m.height)}
             </LineChart>
           </ResponsiveContainer>
           </div>
@@ -1515,7 +1515,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 label={createYAxisLabel('Head Circumference (cm)')}
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData.measurements, m => m.headCircumference)}
+              {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData?.measurements, m => m.headCircumference)}
             </LineChart>
           </ResponsiveContainer>
           </div>
@@ -1552,7 +1552,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} 
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi)}
+              {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData?.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi)}
             </LineChart>
           </ResponsiveContainer>
           </div>
@@ -1563,13 +1563,13 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
 
       {/* Advanced Anthropometry (WHO only) */}
       {referenceSources?.age === 'who' &&
-        patientData.measurements && Array.isArray(patientData.measurements) &&
-        patientData.measurements.some(m => m && (m.armCircumference || m.subscapularSkinfold || m.tricepsSkinfold)) && (
+        patientData?.measurements && Array.isArray(patientData?.measurements) &&
+        patientData?.measurements.some(m => m && (m.armCircumference || m.subscapularSkinfold || m.tricepsSkinfold)) && (
         <div className="chart-section">
           <h3 className="section-header">Advanced (WHO Reference)</h3>
 
           {/* Arm Circumference-for-Age */}
-          {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.armCircumference) && acfaData && acfaData.length > 0 && (
+          {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.armCircumference) && acfaData && acfaData.length > 0 && (
             <div className="chart-container">
               <h3>Mid-Upper Arm Circumference-for-Age <span className="chart-source">(WHO)</span></h3>
               {isRendering ? (
@@ -1594,7 +1594,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     label={createYAxisLabel('Arm Circumference (cm)')}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
-                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData.measurements, m => m.armCircumference)}
+                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData?.measurements, m => m.armCircumference)}
                 </LineChart>
               </ResponsiveContainer>
               </div>
@@ -1603,7 +1603,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           )}
 
           {/* Subscapular Skinfold-for-Age */}
-          {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.subscapularSkinfold) && ssfaData && ssfaData.length > 0 && (
+          {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.subscapularSkinfold) && ssfaData && ssfaData.length > 0 && (
             <div className="chart-container">
               <h3>Subscapular Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
               {isRendering ? (
@@ -1628,7 +1628,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
-                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData.measurements, m => m.subscapularSkinfold)}
+                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData?.measurements, m => m.subscapularSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
               </div>
@@ -1637,7 +1637,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           )}
 
           {/* Triceps Skinfold-for-Age */}
-          {patientData.measurements && Array.isArray(patientData.measurements) && patientData.measurements.some(m => m && m.tricepsSkinfold) && tsfaData && tsfaData.length > 0 && (
+          {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.tricepsSkinfold) && tsfaData && tsfaData.length > 0 && (
             <div className="chart-container">
               <h3>Triceps Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
               {isRendering ? (
@@ -1662,7 +1662,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
-                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData.measurements, m => m.tricepsSkinfold)}
+                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData?.measurements, m => m.tricepsSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
               </div>
@@ -1702,7 +1702,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }}
                 />
                 {/* Legend removed - labels now appear at end of lines */}
-                {renderWeightForHeightLines(whChartData, patientData.measurements)}
+                {renderWeightForHeightLines(whChartData, patientData?.measurements)}
               </LineChart>
             </ResponsiveContainer>
             </div>

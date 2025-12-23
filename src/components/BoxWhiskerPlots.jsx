@@ -94,17 +94,17 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   const [loading, setLoading] = useState(true)
   
   useEffect(() => {
-    if (patientData.gender && patientData.measurements && patientData.measurements.length > 0) {
+    if (patientData?.gender && patientData?.measurements && patientData?.measurements.length > 0) {
       loadReferenceData()
     } else {
       setLoading(false)
     }
-  }, [patientData.gender, patientData.measurements, referenceSources?.age])
+  }, [patientData?.gender, patientData?.measurements, referenceSources?.age])
 
   const loadReferenceData = async () => {
     setLoading(true)
     try {
-      const gKey = genderToKey(patientData.gender)
+      const gKey = genderToKey(patientData?.gender || 'male')
       const ageSource = referenceSources?.age || 'who'
       const baseUrl = import.meta.env.BASE_URL
 
@@ -317,10 +317,10 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   }
 
   const getWeightHeightReference = () => {
-    if (!weightHeightData || !patientData.measurements || patientData.measurements.length === 0) return null
+    if (!weightHeightData || !patientData?.measurements || patientData?.measurements.length === 0) return null
     
     // Get the latest measurement that has both weight and height
-    const measurementsWithBoth = patientData.measurements
+    const measurementsWithBoth = (patientData?.measurements || [])
       .filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
       .sort((a, b) => {
         const dateA = new Date(a.date || 0)
@@ -351,7 +351,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     return <div className="loading">Loading reference data...</div>
   }
 
-  if (!patientData.measurements || patientData.measurements.length === 0 || !patientData.gender) {
+  if (!patientData?.measurements || patientData?.measurements.length === 0 || !patientData?.gender) {
     return null
   }
 
@@ -359,10 +359,10 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
 
   // Helper function to get the latest measurement for a specific field
   const getLatestMeasurementForField = (fieldName) => {
-    if (!patientData.measurements || patientData.measurements.length === 0) return null
+    if (!patientData?.measurements || patientData?.measurements.length === 0) return null
     
     // Filter to measurements that have this field with a valid value
-    const measurementsWithValue = patientData.measurements.filter(m => {
+    const measurementsWithValue = patientData?.measurements.filter(m => {
       const value = m[fieldName]
       return value != null && value !== undefined && value > 0
     })
@@ -388,7 +388,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   const tsfaMeasurement = getLatestMeasurementForField('tricepsSkinfold')
   
   // For BMI and Weight-for-Height, we need both weight and height
-  const weightHeightMeasurement = patientData.measurements
+  const weightHeightMeasurement = (patientData?.measurements || [])
     .filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
     .sort((a, b) => {
       const dateA = new Date(a.date || 0)
