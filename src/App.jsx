@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import './App.css'
 import DataInputForm from './components/DataInputForm'
 import GrowthCharts from './components/GrowthCharts'
@@ -74,11 +74,46 @@ function App() {
     return { age: 'who', wfh: 'who' }
   })
 
+  // Get the selected person's measurements count for dependency tracking
+  const selectedPersonMeasurements = selectedPersonId && people[selectedPersonId] 
+    ? (Array.isArray(people[selectedPersonId].measurements) ? people[selectedPersonId].measurements : [])
+    : []
+  const measurementsKey = `${selectedPersonId}_${selectedPersonMeasurements.length}_${JSON.stringify(selectedPersonMeasurements.map(m => m.date))}`
+  
   // Update patientData when selectedPersonId or people change
   useEffect(() => {
-    if (selectedPersonId && people[selectedPersonId]) {
-      setPatientData(people[selectedPersonId])
-    } else if (!selectedPersonId) {
+    if (selectedPersonId) {
+      let person = people[selectedPersonId]
+      
+      // If person not found by key, try to find by ID (fallback for edge cases)
+      if (!person && selectedPersonId) {
+        const foundPerson = Object.values(people).find(p => {
+          const personKey = getPersonKey(p.name, p.birthDate)
+          return personKey === selectedPersonId
+        })
+        if (foundPerson) {
+          person = foundPerson
+        }
+      }
+      
+      if (person) {
+        // Use the person object directly, ensuring measurements array exists
+        const measurements = Array.isArray(person.measurements) ? person.measurements : []
+        // Always update to ensure we have the latest data
+        setPatientData({
+          ...person,
+          measurements: measurements
+        })
+      } else {
+        // Person ID is set but person doesn't exist in people - reset patientData
+        setPatientData({
+          name: '',
+          gender: '',
+          birthDate: '',
+          measurements: []
+        })
+      }
+    } else {
       setPatientData({
         name: '',
         gender: '',
@@ -86,7 +121,7 @@ function App() {
         measurements: []
       })
     }
-  }, [selectedPersonId, people])
+  }, [selectedPersonId, people, measurementsKey])
 
   // Save people to localStorage whenever they change
   useEffect(() => {
@@ -185,14 +220,19 @@ function App() {
       
       setSelectedPersonId(personKey)
     } else {
-      // Update existing person
-      setPeople(prev => ({
-        ...prev,
-        [selectedPersonId]: {
-          ...prev[selectedPersonId],
-          ...newData
+      // Update existing person - preserve measurements if not provided in newData
+      setPeople(prev => {
+        const existing = prev[selectedPersonId]
+        return {
+          ...prev,
+          [selectedPersonId]: {
+            ...existing,
+            ...newData,
+            // Explicitly preserve measurements if they exist and aren't being updated
+            measurements: newData.measurements !== undefined ? newData.measurements : (existing?.measurements || [])
+          }
         }
-      }))
+      })
     }
   }
 

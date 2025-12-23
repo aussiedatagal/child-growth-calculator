@@ -722,7 +722,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
 
   return (
     <div className="box-whisker-plots">
-      <h2>Percentile Distribution</h2>
+      <h3 className="section-header">Percentile Distribution</h3>
       <p className="plot-description">
         Box plots show reference percentiles (3rd, 15th, 50th, 85th, 97th). 
         The black marker shows where your measurement falls on this distribution.
