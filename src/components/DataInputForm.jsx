@@ -705,20 +705,6 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                 )}
 
                 <div className="form-group">
-                  <label htmlFor="height">Height (cm)</label>
-                  <input
-                    type="number"
-                    id="height"
-                    name="height"
-                    value={formData.height}
-                    onChange={handleInputChange}
-                    step="0.1"
-                    min="0"
-                    placeholder="e.g., 85.5"
-                  />
-                </div>
-
-                <div className="form-group">
                   <label htmlFor="weight">Weight (kg)</label>
                   <input
                     type="number"
@@ -729,6 +715,20 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                     step="0.01"
                     min="0"
                     placeholder="e.g., 12.3"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="height">Height (cm)</label>
+                  <input
+                    type="number"
+                    id="height"
+                    name="height"
+                    value={formData.height}
+                    onChange={handleInputChange}
+                    step="0.1"
+                    min="0"
+                    placeholder="e.g., 85.5"
                   />
                 </div>
 
