@@ -1344,7 +1344,30 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
 
   return (
     <div className="growth-charts">
-      <h2>Growth Curves</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+        <h2 style={{ margin: 0 }}>Charts</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <label htmlFor="dataSource" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#555' }}>Data Source:</label>
+          <select
+            id="dataSource"
+            name="dataSource"
+            value={referenceSources?.age || 'who'}
+            onChange={(e) => onReferenceSourcesChange(prev => ({ ...prev, age: e.target.value }))}
+            style={{
+              padding: '0.5rem',
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+              fontSize: '0.95rem',
+              background: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            {AGE_SOURCES.map(s => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
       
       {/* Age-based Charts Section */}
       <div className="chart-section">

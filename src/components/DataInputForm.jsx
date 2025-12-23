@@ -27,7 +27,7 @@ const getPersonKey = (name, birthDate) => {
   return `${(name || '').trim()}_${birthDate || ''}`
 }
 
-function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange, onExportData, onImportData }) {
+function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange, onExportData, onImportData }) {
   const [showAddPersonForm, setShowAddPersonForm] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
   const [newPersonDOB, setNewPersonDOB] = useState('')
@@ -51,6 +51,19 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
   const [inlineEditData, setInlineEditData] = useState(null)
   const [expandedRows, setExpandedRows] = useState(new Set())
   const [showPatientInfo, setShowPatientInfo] = useState(false)
+  
+  // Auto-expand patient info when a person is selected and data is available
+  useEffect(() => {
+    if (selectedPersonId && patientData) {
+      // Always expand if there's any patient data
+      if (patientData.name || patientData.gender || patientData.birthDate || (patientData.measurements && patientData.measurements.length > 0)) {
+        setShowPatientInfo(true)
+      }
+    } else if (selectedPersonId && !patientData) {
+      // If selectedPersonId is set but patientData isn't loaded yet, wait a bit
+      // This handles the case where the useEffect in App.jsx hasn't run yet
+    }
+  }, [selectedPersonId, patientData])
   const [showAddMeasurementForm, setShowAddMeasurementForm] = useState(false)
   const [patientInfoFormData, setPatientInfoFormData] = useState({
     name: '',
@@ -87,6 +100,23 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
       }
     }
   }, [])
+
+  // Sync patientInfoFormData with patientData when person is selected
+  useEffect(() => {
+    if (patientData && selectedPersonId) {
+      setPatientInfoFormData({
+        name: patientData.name || '',
+        gender: patientData.gender || '',
+        birthDate: patientData.birthDate || ''
+      })
+    } else if (!selectedPersonId) {
+      setPatientInfoFormData({
+        name: '',
+        gender: '',
+        birthDate: ''
+      })
+    }
+  }, [patientData, selectedPersonId])
 
   // Age is calculated automatically from birth date and measurement date
   // No need to store it in form data
@@ -264,9 +294,11 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
   }
 
   const handleSavePatientInfo = () => {
+    // Ensure measurements are preserved when updating patient info
     onDataUpdate({
       ...patientData,
-      ...patientInfoFormData
+      ...patientInfoFormData,
+      measurements: patientData.measurements || [] // Explicitly preserve measurements
     })
     setShowPatientInfo(false)
   }
@@ -349,8 +381,11 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
                     personSelectRef.current.value = selectedPersonId || ''
                   }
                 }, 0)
+              } else if (value) {
+                // Only call onSelectPerson if value is not empty
+                onSelectPerson(value)
               } else {
-                onSelectPerson(value || null)
+                onSelectPerson(null)
               }
             }}
             style={{ flex: 1 }}
@@ -359,11 +394,14 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
             <option value="__add__">+ Add New Person</option>
             <option value="__import__">📤 Import Data</option>
             {peopleList.length > 0 && <option disabled>──────────</option>}
-            {peopleList.map(person => (
-              <option key={person.id} value={getPersonKey(person.name, person.birthDate)}>
-                {person.name || 'Unnamed'} {person.birthDate ? `(${new Date(person.birthDate).toLocaleDateString()})` : ''} - {person.measurements?.length || 0} measurements
-              </option>
-            ))}
+            {peopleList.map(person => {
+              const personKey = getPersonKey(person.name, person.birthDate)
+              return (
+                <option key={person.id} value={personKey}>
+                  {person.name || 'Unnamed'} {person.birthDate ? `(${new Date(person.birthDate).toLocaleDateString()})` : ''} - {person.measurements?.length || 0} measurements
+                </option>
+              )
+            })}
           </select>
           {selectedPersonId && (
             <button
@@ -470,22 +508,22 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
 
       {selectedPersonId && (
         <>
-      <div style={{ marginBottom: '1rem' }}>
-        <div 
-          onClick={() => setShowPatientInfo(!showPatientInfo)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0.75rem',
-            backgroundColor: showPatientInfo ? '#f8f9fa' : 'white',
-            border: '1px solid #e0e0e0',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            transition: 'background-color 0.2s'
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: '1.2rem' }}>Patient Information</h2>
+          <div style={{ marginBottom: '1rem' }}>
+            <div 
+              onClick={() => setShowPatientInfo(!showPatientInfo)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.75rem',
+                backgroundColor: showPatientInfo ? '#f8f9fa' : 'white',
+                border: '1px solid #e0e0e0',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s'
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>Patient Information</h2>
           <span style={{ 
             display: 'inline-block',
             transform: showPatientInfo ? 'rotate(90deg)' : 'rotate(0deg)',
@@ -556,9 +594,9 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
                 type="button"
                 onClick={() => {
                   setPatientInfoFormData({
-                    name: patientData.name || '',
-                    gender: patientData.gender || '',
-                    birthDate: patientData.birthDate || ''
+                    name: (patientData && patientData.name) || '',
+                    gender: (patientData && patientData.gender) || '',
+                    birthDate: (patientData && patientData.birthDate) || ''
                   })
                   setShowPatientInfo(false)
                 }}
@@ -570,228 +608,226 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
             </div>
           </div>
         )}
-      </div>
+          </div>
 
-      <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-        <label htmlFor="dataSource">Data Source:</label>
-        <select
-          id="dataSource"
-          name="dataSource"
-          value={referenceSources?.age || 'who'}
-          onChange={(e) => onReferenceSourcesChange(prev => ({ ...prev, age: e.target.value }))}
-        >
-          {AGE_SOURCES.map(s => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-        <small>Applies to all charts</small>
-      </div>
+          {(!patientData || !patientData.measurements || patientData.measurements.length === 0) && (
+        <div style={{ 
+          padding: '1rem', 
+          background: '#fff3cd', 
+          borderRadius: '6px', 
+          marginBottom: '1.5rem',
+          border: '1px solid #ffc107',
+          color: '#856404'
+        }}>
+          No measurements yet. Add a measurement to view charts.
+        </div>
+      )}
 
-      <div style={{ marginBottom: '1.5rem' }}>
-        {!showAddMeasurementForm ? (
-          <button
-            type="button"
-            onClick={() => setShowAddMeasurementForm(true)}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              background: '#667eea',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '1rem',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            + Add Measurement
-          </button>
-        ) : (
-          <div style={{
-            padding: '1rem',
-            backgroundColor: '#f8f9fa',
-            border: '1px solid #e0e0e0',
-            borderRadius: '6px'
-          }}>
+          {patientData && patientData.measurements && patientData.measurements.length > 0 && (
+            <div className="measurements-list">
+          {!showAddMeasurementForm && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{editingIndex !== null ? 'Edit Measurement' : 'Add Measurement'}</h2>
+              <h3 style={{ margin: 0 }}>Measurements ({patientData.measurements.length})</h3>
               <button
                 type="button"
-                onClick={() => {
-                  setShowAddMeasurementForm(false)
-                  setEditingIndex(null)
-                  setFormData(getInitialFormData())
-                }}
+                onClick={() => setShowAddMeasurementForm(true)}
                 style={{
-                  padding: '0.25rem 0.5rem',
-                  background: '#95a5a6',
+                  padding: '0.5rem 1rem',
+                  background: '#667eea',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
-                  fontSize: '0.85rem',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
                   cursor: 'pointer'
                 }}
               >
-                Cancel
+                + Add Measurement
               </button>
             </div>
-            
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label htmlFor="date">Measurement Date *</label>
-                <input
-                  type="date"
-                  id="date"
-                  name="date"
-                  value={formData.date}
-                  onChange={handleInputChange}
-                  required
-                />
+          )}
+          {showAddMeasurementForm && (
+            <div style={{
+              padding: '1rem',
+              backgroundColor: '#f8f9fa',
+              border: '1px solid #e0e0e0',
+              borderRadius: '6px',
+              marginBottom: '1.5rem'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{editingIndex !== null ? 'Edit Measurement' : 'Add Measurement'}</h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddMeasurementForm(false)
+                    setEditingIndex(null)
+                    setFormData(getInitialFormData())
+                  }}
+                  style={{
+                    padding: '0.25rem 0.5rem',
+                    background: '#95a5a6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
               </div>
-
-              {!patientData.birthDate && (
-                <div style={{ 
-                  padding: '0.75rem', 
-                  background: '#fff3cd', 
-                  borderRadius: '6px', 
-                  marginBottom: '1rem',
-                  border: '1px solid #ffc107',
-                  color: '#856404',
-                  fontSize: '0.9rem'
-                }}>
-                  ⚠️ Birth date is required to calculate age. Please set the person's birth date in the patient information section above.
+              
+              <form onSubmit={handleSubmit}>
+                <div className="form-group">
+                  <label htmlFor="date">Measurement Date *</label>
+                  <input
+                    type="date"
+                    id="date"
+                    name="date"
+                    value={formData.date}
+                    onChange={handleInputChange}
+                    required
+                  />
                 </div>
-              )}
 
-              <div className="form-group">
-                <label htmlFor="height">Height (cm)</label>
-                <input
-                  type="number"
-                  id="height"
-                  name="height"
-                  value={formData.height}
-                  onChange={handleInputChange}
-                  step="0.1"
-                  min="0"
-                  placeholder="e.g., 85.5"
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="weight">Weight (kg)</label>
-                <input
-                  type="number"
-                  id="weight"
-                  name="weight"
-                  value={formData.weight}
-                  onChange={handleInputChange}
-                  step="0.01"
-                  min="0"
-                  placeholder="e.g., 12.3"
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="headCircumference">Head Circumference (cm)</label>
-                <input
-                  type="number"
-                  id="headCircumference"
-                  name="headCircumference"
-                  value={formData.headCircumference}
-                  onChange={handleInputChange}
-                  step="0.1"
-                  min="0"
-                  placeholder="e.g., 45.2"
-                />
-              </div>
-
-              {referenceSources?.age === 'who' && (
-                <div className="advanced-section">
-                  <div
-                    className="advanced-toggle"
-                    onClick={() => setShowAdvanced(prev => !prev)}
-                    style={{ cursor: 'pointer', userSelect: 'none' }}
-                  >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ 
-                        display: 'inline-block',
-                        transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)',
-                        transition: 'transform 0.2s',
-                        fontSize: '0.8rem'
-                      }}>▶</span>
-                      <span style={{ fontWeight: 500, color: '#555' }}>Advanced Measurements</span>
-                    </span>
-                    <small style={{ display: 'block', marginTop: '0.25rem', marginLeft: '1.5rem', color: '#888' }}>
-                      Arm circumference and skinfolds (optional, WHO reference only)
-                    </small>
+                {!patientData.birthDate && (
+                  <div style={{ 
+                    padding: '0.75rem', 
+                    background: '#fff3cd', 
+                    borderRadius: '6px', 
+                    marginBottom: '1rem',
+                    border: '1px solid #ffc107',
+                    color: '#856404',
+                    fontSize: '0.9rem'
+                  }}>
+                    ⚠️ Birth date is required to calculate age. Please set the person's birth date in the patient information section above.
                   </div>
+                )}
 
-                  {showAdvanced && (
-                  <>
-                    <div className="form-group">
-                      <label htmlFor="armCircumference">Mid-Upper Arm Circumference (cm)</label>
-                      <input
-                        type="number"
-                        id="armCircumference"
-                        name="armCircumference"
-                        value={formData.armCircumference}
-                        onChange={handleInputChange}
-                        step="0.1"
-                        min="0"
-                        placeholder="e.g., 16.5"
-                      />
+                <div className="form-group">
+                  <label htmlFor="height">Height (cm)</label>
+                  <input
+                    type="number"
+                    id="height"
+                    name="height"
+                    value={formData.height}
+                    onChange={handleInputChange}
+                    step="0.1"
+                    min="0"
+                    placeholder="e.g., 85.5"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="weight">Weight (kg)</label>
+                  <input
+                    type="number"
+                    id="weight"
+                    name="weight"
+                    value={formData.weight}
+                    onChange={handleInputChange}
+                    step="0.01"
+                    min="0"
+                    placeholder="e.g., 12.3"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="headCircumference">Head Circumference (cm)</label>
+                  <input
+                    type="number"
+                    id="headCircumference"
+                    name="headCircumference"
+                    value={formData.headCircumference}
+                    onChange={handleInputChange}
+                    step="0.1"
+                    min="0"
+                    placeholder="e.g., 45.2"
+                  />
+                </div>
+
+                {referenceSources?.age === 'who' && (
+                  <div className="advanced-section">
+                    <div
+                      className="advanced-toggle"
+                      onClick={() => setShowAdvanced(prev => !prev)}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ 
+                          display: 'inline-block',
+                          transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)',
+                          transition: 'transform 0.2s',
+                          fontSize: '0.8rem'
+                        }}>▶</span>
+                        <span style={{ fontWeight: 500, color: '#555' }}>Advanced Measurements</span>
+                      </span>
+                      <small style={{ display: 'block', marginTop: '0.25rem', marginLeft: '1.5rem', color: '#888' }}>
+                        Arm circumference and skinfolds (optional, WHO reference only)
+                      </small>
                     </div>
 
-                    <div className="form-group">
-                      <label htmlFor="subscapularSkinfold">Subscapular Skinfold (mm)</label>
-                      <input
-                        type="number"
-                        id="subscapularSkinfold"
-                        name="subscapularSkinfold"
-                        value={formData.subscapularSkinfold}
-                        onChange={handleInputChange}
-                        step="0.1"
-                        min="0"
-                        placeholder="e.g., 8.3"
-                      />
-                    </div>
+                    {showAdvanced && (
+                    <>
+                      <div className="form-group">
+                        <label htmlFor="armCircumference">Mid-Upper Arm Circumference (cm)</label>
+                        <input
+                          type="number"
+                          id="armCircumference"
+                          name="armCircumference"
+                          value={formData.armCircumference}
+                          onChange={handleInputChange}
+                          step="0.1"
+                          min="0"
+                          placeholder="e.g., 16.5"
+                        />
+                      </div>
 
-                    <div className="form-group">
-                      <label htmlFor="tricepsSkinfold">Triceps Skinfold (mm)</label>
-                      <input
-                        type="number"
-                        id="tricepsSkinfold"
-                        name="tricepsSkinfold"
-                        value={formData.tricepsSkinfold}
-                        onChange={handleInputChange}
-                        step="0.1"
-                        min="0"
-                        placeholder="e.g., 9.1"
-                      />
-                    </div>
-                  </>
+                      <div className="form-group">
+                        <label htmlFor="subscapularSkinfold">Subscapular Skinfold (mm)</label>
+                        <input
+                          type="number"
+                          id="subscapularSkinfold"
+                          name="subscapularSkinfold"
+                          value={formData.subscapularSkinfold}
+                          onChange={handleInputChange}
+                          step="0.1"
+                          min="0"
+                          placeholder="e.g., 8.3"
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label htmlFor="tricepsSkinfold">Triceps Skinfold (mm)</label>
+                        <input
+                          type="number"
+                          id="tricepsSkinfold"
+                          name="tricepsSkinfold"
+                          value={formData.tricepsSkinfold}
+                          onChange={handleInputChange}
+                          step="0.1"
+                          min="0"
+                          placeholder="e.g., 9.1"
+                        />
+                      </div>
+                    </>
+                    )}
+                  </div>
+                )}
+
+                <div className="form-group" style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
+                  <button type="submit" className="submit-btn" style={{ flex: 1 }}>
+                    {editingIndex !== null ? 'Update Measurement' : 'Add Measurement'}
+                  </button>
+                  {editingIndex !== null && (
+                    <button type="button" onClick={handleCancelEdit} className="clear-btn" style={{ flex: 1, background: '#95a5a6' }}>
+                      Cancel
+                    </button>
                   )}
                 </div>
-              )}
-
-              <div className="form-group" style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
-                <button type="submit" className="submit-btn" style={{ flex: 1 }}>
-                  {editingIndex !== null ? 'Update Measurement' : 'Add Measurement'}
-                </button>
-                {editingIndex !== null && (
-                  <button type="button" onClick={handleCancelEdit} className="clear-btn" style={{ flex: 1, background: '#95a5a6' }}>
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-        )}
-      </div>
-
-      {patientData.measurements && patientData.measurements.length > 0 && (
-        <div className="measurements-list">
-          <h3>Measurements ({patientData.measurements.length})</h3>
+              </form>
+            </div>
+          )}
           <div className="measurements-expandable">
             {patientData.measurements.map((m, index) => {
               const isEditing = inlineEditingIndex === index
@@ -1117,8 +1153,8 @@ function DataInputForm({ patientData, people, selectedPersonId, onDataUpdate, on
           >
             📥 Download Data
           </button>
-        </div>
-      )}
+            </div>
+          )}
         </>
       )}
     </div>
