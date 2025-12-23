@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import './App.css'
 import DataInputForm from './components/DataInputForm'
 import GrowthCharts from './components/GrowthCharts'
@@ -7,11 +7,6 @@ import BoxWhiskerPlots from './components/BoxWhiskerPlots'
 // Generate a unique ID for a person based on name and DOB
 const getPersonId = (name, birthDate) => {
   return `${name || 'Unnamed'}_${birthDate || 'NoDOB'}_${Date.now()}`
-}
-
-// Get person key from name and DOB (for matching existing people)
-const getPersonKey = (name, birthDate) => {
-  return `${(name || '').trim()}_${birthDate || ''}`
 }
 
 const calculateAge = (birthDate, measurementDate) => {
@@ -32,7 +27,7 @@ const recalculatePersonAges = (person) => {
   if (!person || !person.birthDate || !person.measurements) return person
   
   const updatedMeasurements = person.measurements.map(m => {
-    if (m.date) {
+    if (person.birthDate && m.date) {
       const age = calculateAge(person.birthDate, m.date)
       return {
         ...m,
@@ -42,7 +37,7 @@ const recalculatePersonAges = (person) => {
     }
     return m
   })
-  
+
   return {
     ...person,
     measurements: updatedMeasurements
@@ -58,7 +53,7 @@ function App() {
         // Migrate old format to new format
         if (parsed.name || parsed.gender || parsed.birthDate || parsed.measurements) {
           // Old single-person format - convert to new format
-          const personKey = getPersonKey(parsed.name, parsed.birthDate)
+          const id = getPersonId(parsed.name, parsed.birthDate)
           const rawMeasurements = parsed.measurements || (parsed.measurement ? [parsed.measurement] : [])
           
           // Ensure measurements have IDs
@@ -67,27 +62,33 @@ function App() {
             id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
           }))
 
-          const migratedPeople = {
-            [personKey]: {
-              id: getPersonId(parsed.name, parsed.birthDate),
+          return {
+            [id]: {
+              id,
               name: parsed.name || '',
               gender: parsed.gender || '',
               birthDate: parsed.birthDate || '',
               measurements: measurements
             }
           }
-          return migratedPeople
         }
         
-        // Ensure all people in the new format have IDs for their measurements
-        const migratedPeople = { ...parsed }
-        Object.keys(migratedPeople).forEach(key => {
-          const person = migratedPeople[key]
+        // Ensure all people in the new format have stable IDs and use ID as key
+        const migratedPeople = {}
+        Object.keys(parsed).forEach(key => {
+          const person = parsed[key]
+          const id = person.id || key
+          
           if (person.measurements) {
             person.measurements = person.measurements.map(m => ({
               ...m,
               id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
             }))
+          }
+          
+          migratedPeople[id] = {
+            ...person,
+            id
           }
         })
         return migratedPeople
@@ -122,9 +123,17 @@ function App() {
     if (selectedPersonId) {
       let person = people[selectedPersonId]
       
-      // Fallback: If person not found by key, try to find by ID (rare edge cases)
+      // Fallback: If person not found by ID key, try to find by ID property
       if (!person) {
         person = Object.values(people).find(p => p.id === selectedPersonId)
+      }
+
+      // Secondary fallback: If still not found, check if it's an old personKey
+      if (!person) {
+        person = Object.values(people).find(p => {
+          const personKey = `${(p.name || '').trim()}_${p.birthDate || ''}`
+          return personKey === selectedPersonId
+        })
       }
       
       if (person) {
@@ -149,13 +158,7 @@ function App() {
         }
       }
     }
-    
-    return {
-      name: '',
-      gender: '',
-      birthDate: '',
-      measurements: []
-    }
+    return null
   }, [selectedPersonId, people])
 
   // Save people to localStorage whenever they change
@@ -172,23 +175,39 @@ function App() {
     }
   }, [selectedPersonId])
 
+  // Normalize selectedPersonId if it's an old key or mismatch
+  useEffect(() => {
+    if (selectedPersonId && !people[selectedPersonId]) {
+      const person = Object.values(people).find(p => 
+        p.id === selectedPersonId || 
+        `${(p.name || '').trim()}_${p.birthDate || ''}` === selectedPersonId
+      )
+      if (person) {
+        setSelectedPersonId(person.id)
+      }
+    }
+  }, [selectedPersonId, people])
+
   useEffect(() => {
     localStorage.setItem('growthChartSources', JSON.stringify(referenceSources))
   }, [referenceSources])
 
   const handleAddPerson = (name, birthDate, gender) => {
-    const personKey = getPersonKey(name, birthDate)
-    
     // Check if person already exists
-    if (people[personKey]) {
+    const existingPerson = Object.values(people).find(
+      p => (p.name || '').trim() === (name || '').trim() && p.birthDate === birthDate
+    )
+    
+    if (existingPerson) {
       // Person exists, select them
-      setSelectedPersonId(personKey)
-      return personKey
+      setSelectedPersonId(existingPerson.id)
+      return existingPerson.id
     }
 
     // Create new person
+    const id = getPersonId(name, birthDate)
     const newPerson = {
-      id: getPersonId(name, birthDate),
+      id,
       name: name || '',
       gender: gender || '',
       birthDate: birthDate || '',
@@ -197,11 +216,11 @@ function App() {
 
     setPeople(prev => ({
       ...prev,
-      [personKey]: newPerson
+      [id]: newPerson
     }))
 
-    setSelectedPersonId(personKey)
-    return personKey
+    setSelectedPersonId(id)
+    return id
   }
 
   const handleSelectPerson = (personId) => {
@@ -224,34 +243,35 @@ function App() {
   const handleDataUpdate = (newData) => {
     if (!selectedPersonId) return
     
-    const personKey = getPersonKey(newData.name, newData.birthDate)
-    
-    // Case 1: Name/DOB changed to match ANOTHER existing person
-    if (personKey !== selectedPersonId && people[personKey]) {
+    // Check if Name/DOB changed to match ANOTHER existing person
+    const otherPerson = Object.values(people).find(p => 
+      p.id !== selectedPersonId && 
+      (p.name || '').trim() === (newData.name || '').trim() && 
+      p.birthDate === newData.birthDate
+    )
+
+    if (otherPerson) {
       // Merge measurements with the other person
-      const existing = people[personKey]
-      const mergedMeasurements = [...(existing.measurements || []), ...(newData.measurements || [])]
-      mergedMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      const mergedMeasurements = [...(otherPerson.measurements || []), ...(newData.measurements || [])]
+      // Sort and deduplicate by ID
+      const uniqueMeasurements = Array.from(new Map(mergedMeasurements.map(m => [m.id, m])).values())
+      uniqueMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
       
       const updatedPerson = recalculatePersonAges({
-        ...existing,
+        ...otherPerson,
         ...newData,
-        measurements: mergedMeasurements
+        measurements: uniqueMeasurements
       })
       
       setPeople(prev => {
         const updated = { ...prev }
-        updated[personKey] = updatedPerson
-        // Remove old entry if key changed
-        if (selectedPersonId !== personKey) {
-          delete updated[selectedPersonId]
-        }
+        updated[otherPerson.id] = updatedPerson
+        delete updated[selectedPersonId]
         return updated
       })
       
-      setSelectedPersonId(personKey)
+      setSelectedPersonId(otherPerson.id)
     } 
-    // Case 2: Name/DOB changed to something that doesn't exist yet, OR didn't change name/DOB
     else {
       setPeople(prev => {
         const existing = prev[selectedPersonId]
@@ -263,21 +283,11 @@ function App() {
           measurements: newData.measurements !== undefined ? newData.measurements : (existing?.measurements || [])
         })
         
-        const updated = { ...prev }
-        if (personKey !== selectedPersonId) {
-          // Key changed - move to new key and delete old one
-          updated[personKey] = updatedPerson
-          delete updated[selectedPersonId]
-        } else {
-          // Key stayed same
-          updated[selectedPersonId] = updatedPerson
+        return {
+          ...prev,
+          [selectedPersonId]: updatedPerson
         }
-        return updated
       })
-
-      if (personKey !== selectedPersonId) {
-        setSelectedPersonId(personKey)
-      }
     }
   }
 
@@ -291,84 +301,36 @@ function App() {
       const existingMeasurements = person.measurements || []
       
       // Ensure the new measurement has a unique ID if it doesn't already
-      const measurementWithId = {
+      const newMeasurement = {
         ...measurement,
         id: measurement.id || `${measurement.date}_${Math.random().toString(36).substr(2, 9)}`
       }
       
-      // Check for duplicate date
-      const existingIndex = existingMeasurements.findIndex(
-        m => m.date === measurementWithId.date
-      )
+      // Add or update measurement
+      const measurementIndex = existingMeasurements.findIndex(m => m.id === newMeasurement.id)
+      let updatedMeasurements
       
-      if (existingIndex >= 0) {
-        // Same date - merge measurements
-        const existing = existingMeasurements[existingIndex]
-        const conflicts = []
-        
-        // Check for conflicts (same field but different values)
-        const fields = ['height', 'weight', 'headCircumference', 'armCircumference', 'subscapularSkinfold', 'tricepsSkinfold']
-        fields.forEach(field => {
-          const existingVal = existing[field]
-          const newVal = measurementWithId[field]
-          
-          if (existingVal != null && newVal != null && existingVal !== newVal) {
-            conflicts.push({
-              field,
-              existing: existingVal,
-              new: newVal
-            })
-          }
-        })
-        
-        if (conflicts.length > 0) {
-          // Show error with conflict details
-          const conflictMsg = conflicts.map(c => 
-            `${c.field}: existing=${c.existing}, new=${c.new}`
-          ).join('\n')
-          alert(`Cannot merge measurements: conflicting values for the same date:\n${conflictMsg}\n\nPlease edit the existing measurement instead.`)
-          return prev
-        }
-        
-        // Merge measurements (new values override nulls, but don't override existing non-null values)
-        const merged = { ...existing }
-        fields.forEach(field => {
-          if (merged[field] == null && measurementWithId[field] != null) {
-            merged[field] = measurementWithId[field]
-          }
-        })
-        // Update age if provided
-        if (measurementWithId.ageYears != null) merged.ageYears = measurementWithId.ageYears
-        if (measurementWithId.ageMonths != null) merged.ageMonths = measurementWithId.ageMonths
-        
-        const newMeasurements = [...existingMeasurements]
-        newMeasurements[existingIndex] = merged
-        
-        return {
-          ...prev,
-          [selectedPersonId]: {
-            ...person,
-            measurements: newMeasurements
-          }
-        }
+      if (measurementIndex > -1) {
+        updatedMeasurements = [...existingMeasurements]
+        updatedMeasurements[measurementIndex] = newMeasurement
+      } else {
+        updatedMeasurements = [...existingMeasurements, newMeasurement]
       }
       
-      // New measurement - add it
-      const newMeasurements = [...existingMeasurements, measurementWithId]
-      // Sort by date
-      newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      // Sort measurements by date
+      updatedMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
       
       return {
         ...prev,
         [selectedPersonId]: {
           ...person,
-          measurements: newMeasurements
+          measurements: updatedMeasurements
         }
       }
     })
   }
 
-  const handleUpdateMeasurement = (id, measurement) => {
+  const handleUpdateMeasurement = (updatedMeasurement) => {
     if (!selectedPersonId) return
     
     setPeople(prev => {
@@ -376,78 +338,18 @@ function App() {
       if (!person) return prev
       
       const existingMeasurements = person.measurements || []
-      const index = existingMeasurements.findIndex(m => m.id === id)
-      
-      if (index === -1) return prev
-      
-      // Check for duplicate date (excluding current ID)
-      const duplicateIndex = existingMeasurements.findIndex(
-        (m, i) => m.id !== id && m.date === measurement.date
+      const updatedMeasurements = existingMeasurements.map(m => 
+        m.id === updatedMeasurement.id ? updatedMeasurement : m
       )
       
-      if (duplicateIndex >= 0) {
-        // Same date exists - check for conflicts
-        const existing = existingMeasurements[duplicateIndex]
-        const conflicts = []
-        
-        const fields = ['height', 'weight', 'headCircumference', 'armCircumference', 'subscapularSkinfold', 'tricepsSkinfold']
-        fields.forEach(field => {
-          const existingVal = existing[field]
-          const newVal = measurement[field]
-          
-          if (existingVal != null && newVal != null && existingVal !== newVal) {
-            conflicts.push({
-              field,
-              existing: existingVal,
-              new: newVal
-            })
-          }
-        })
-        
-        if (conflicts.length > 0) {
-          const conflictMsg = conflicts.map(c => 
-            `${c.field}: existing=${c.existing}, new=${c.new}`
-          ).join('\n')
-          alert(`Cannot update: conflicting values for the same date:\n${conflictMsg}\n\nPlease use a different date or merge with the existing measurement.`)
-          return prev
-        }
-        
-        // Merge with existing measurement at duplicate index
-        const merged = { ...existing }
-        fields.forEach(field => {
-          if (merged[field] == null && measurement[field] != null) {
-            merged[field] = measurement[field]
-          }
-        })
-        if (measurement.ageYears != null) merged.ageYears = measurement.ageYears
-        if (measurement.ageMonths != null) merged.ageMonths = measurement.ageMonths
-        
-        // Remove the current measurement and update the duplicate one
-        const newMeasurements = existingMeasurements.filter((m) => m.id !== id)
-        const newDuplicateIndex = newMeasurements.findIndex(m => m.id === existing.id)
-        newMeasurements[newDuplicateIndex] = merged
-        newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
-        
-        return {
-          ...prev,
-          [selectedPersonId]: {
-            ...person,
-            measurements: newMeasurements
-          }
-        }
-      }
-      
-      // No duplicate - update normally
-      const newMeasurements = [...existingMeasurements]
-      newMeasurements[index] = { ...measurement, id } // Ensure ID is preserved
-      // Sort by date
-      newMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      // Sort measurements by date
+      updatedMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
       
       return {
         ...prev,
         [selectedPersonId]: {
           ...person,
-          measurements: newMeasurements
+          measurements: updatedMeasurements
         }
       }
     })
@@ -472,7 +374,7 @@ function App() {
     })
   }
 
-  const handleClearData = () => {
+  const handleClearMeasurements = () => {
     if (!selectedPersonId) return
     
     if (confirm('Are you sure you want to clear all measurements for this person?')) {
@@ -486,14 +388,18 @@ function App() {
     }
   }
 
+  const handleReferenceSourcesChange = (newSources) => {
+    setReferenceSources(newSources)
+  }
+
   const handleExportData = () => {
     const data = {
       people,
       selectedPersonId,
-      sources: referenceSources
+      sources: referenceSources,
+      version: '2.0'
     }
-    const json = JSON.stringify(data, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -506,21 +412,23 @@ function App() {
   }
 
   const handleImportData = (data) => {
-    let firstNewPersonKey = null
     let personToSelect = null
     
     if (data.people) {
       // Merge with existing people
       setPeople(prev => {
         const merged = { ...prev }
-        Object.keys(data.people).forEach(key => {
-          if (merged[key]) {
+        let firstNewPersonId = null
+        
+        // Import people and ensure they use ID as key
+        Object.values(data.people).forEach(importedPerson => {
+          const id = importedPerson.id || getPersonId(importedPerson.name, importedPerson.birthDate)
+          const existing = merged[id]
+          
+          if (existing) {
             // Merge measurements
-            const existing = merged[key]
-            const imported = data.people[key]
             const existingMeasurements = existing.measurements || []
-            // Ensure imported measurements have IDs
-            const importedMeasurements = (imported.measurements || []).map(m => ({
+            const importedMeasurements = (importedPerson.measurements || []).map(m => ({
               ...m,
               id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
             }))
@@ -533,12 +441,12 @@ function App() {
             
             // Merge imported measurements
             importedMeasurements.forEach(m => {
-              const existing = measurementMap.get(m.date)
-              if (existing) {
+              const existingM = measurementMap.get(m.date)
+              if (existingM) {
                 // Merge non-conflicting fields
                 Object.keys(m).forEach(field => {
-                  if (existing[field] == null && m[field] != null) {
-                    existing[field] = m[field]
+                  if (existingM[field] == null && m[field] != null) {
+                    existingM[field] = m[field]
                   }
                 })
               } else {
@@ -548,16 +456,20 @@ function App() {
             
             const mergedMeasurements = Array.from(measurementMap.values()).sort((a, b) => new Date(a.date) - new Date(b.date))
             
-            merged[key] = recalculatePersonAges({
+            merged[id] = recalculatePersonAges({
               ...existing,
-              ...imported,
+              ...importedPerson,
+              id,
               measurements: mergedMeasurements
             })
           } else {
-            merged[key] = recalculatePersonAges(data.people[key])
+            merged[id] = recalculatePersonAges({
+              ...importedPerson,
+              id
+            })
             // Track the first newly imported person
-            if (firstNewPersonKey === null) {
-              firstNewPersonKey = key
+            if (firstNewPersonId === null) {
+              firstNewPersonId = id
             }
           }
         })
@@ -565,10 +477,10 @@ function App() {
         // Determine which person to select
         if (data.selectedPersonId && merged[data.selectedPersonId]) {
           personToSelect = data.selectedPersonId
-        } else if (firstNewPersonKey) {
-          personToSelect = firstNewPersonKey
-        } else if (Object.keys(data.people).length > 0) {
-          personToSelect = Object.keys(data.people)[0]
+        } else if (firstNewPersonId) {
+          personToSelect = firstNewPersonId
+        } else if (Object.keys(merged).length > 0) {
+          personToSelect = Object.keys(merged)[0]
         }
         
         return merged
@@ -595,24 +507,16 @@ function App() {
       <header className="app-header">
         <h1>Growth Chart Calculator</h1>
         <p className="subtitle">
-          Track and visualize growth measurements using WHO and CDC references
-        </p>
-        <p className="source-info">
-          Data sources:{' '}
-          <a href="https://www.who.int/tools/child-growth-standards/standards" target="_blank" rel="noopener noreferrer">
-            WHO Child Growth Standards
-          </a>
-          {' · '}
-          <a href="https://www.cdc.gov/growthcharts/cdc-data-files.htm" target="_blank" rel="noopener noreferrer">
-            CDC Growth Charts data files
-          </a>
+          Track and visualize growth measurements using WHO and CDC references.
+          <br />
+          Data sources: <a href="https://www.who.int/toolkits/child-growth-standards/standards" target="_blank" rel="noopener noreferrer">WHO Child Growth Standards</a> · <a href="https://www.cdc.gov/growthcharts/data_tables.htm" target="_blank" rel="noopener noreferrer">CDC Growth Charts data files</a>
         </p>
       </header>
-
+      
       <main className="app-main">
-        <div className="app-grid">
+        <div className="content-container">
           <section className="input-section">
-            <DataInputForm
+            <DataInputForm 
               patientData={patientData}
               people={people}
               selectedPersonId={selectedPersonId}
@@ -623,42 +527,34 @@ function App() {
               onAddMeasurement={handleAddMeasurement}
               onUpdateMeasurement={handleUpdateMeasurement}
               onDeleteMeasurement={handleDeleteMeasurement}
-              onClearData={handleClearData}
+              onClearData={handleClearMeasurements}
               referenceSources={referenceSources}
-              onReferenceSourcesChange={setReferenceSources}
+              onReferenceSourcesChange={handleReferenceSourcesChange}
               onExportData={handleExportData}
               onImportData={handleImportData}
             />
           </section>
-
+          
           <section className="charts-section">
-            <GrowthCharts
-              patientData={patientData}
+            <GrowthCharts 
+              patientData={patientData} 
               referenceSources={referenceSources}
-              onReferenceSourcesChange={setReferenceSources}
             />
-            {patientData.gender && patientData.measurements && patientData.measurements.length > 0 && (
-              <BoxWhiskerPlots
-                patientData={patientData}
+            
+            {patientData && patientData?.measurements && patientData?.measurements.length > 0 && (
+              <BoxWhiskerPlots 
+                patientData={patientData} 
                 referenceSources={referenceSources}
-                onReferenceSourcesChange={setReferenceSources}
               />
             )}
           </section>
         </div>
       </main>
-
+      
       <footer className="app-footer">
         <p>
-          Growth reference data from{' '}
-          <a href="https://www.who.int/tools/child-growth-standards/standards" target="_blank" rel="noopener noreferrer">
-            WHO
-          </a>
-          {' '}and{' '}
-          <a href="https://www.cdc.gov/growthcharts/cdc-data-files.htm" target="_blank" rel="noopener noreferrer">
-            CDC
-          </a>
-          . Please refer to their respective terms of use for data licensing requirements.
+          Growth reference data from <a href="https://www.who.int/toolkits/child-growth-standards" target="_blank" rel="noopener noreferrer">WHO</a> and <a href="https://www.cdc.gov/growthcharts/index.htm" target="_blank" rel="noopener noreferrer">CDC</a>. 
+          Please refer to their respective terms of use for data licensing requirements.
         </p>
         <p>
           This tool is for informational purposes only. Always consult with healthcare professionals for medical decisions.

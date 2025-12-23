@@ -22,11 +22,6 @@ const AGE_SOURCES = [
   { value: 'cdc', label: 'CDC' },
 ]
 
-// Helper function to get person key (same as in App.jsx)
-const getPersonKey = (name, birthDate) => {
-  return `${(name || '').trim()}_${birthDate || ''}`
-}
-
 function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange, onExportData, onImportData }) {
   const [showAddPersonForm, setShowAddPersonForm] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
@@ -51,11 +46,10 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   const [expandedRows, setExpandedRows] = useState(new Set()) // Stores measurement IDs
   const [showPatientInfo, setShowPatientInfo] = useState(false)
   
-  // Auto-expand patient info when a person is selected and data is available
   useEffect(() => {
     if (selectedPersonId && patientData) {
       // Always expand if there's any patient data
-      if (patientData.name || patientData.gender || patientData.birthDate || (patientData.measurements && patientData.measurements.length > 0)) {
+      if (patientData?.name || patientData?.gender || patientData?.birthDate || (patientData?.measurements && patientData?.measurements.length > 0)) {
         setShowPatientInfo(true)
       }
     }
@@ -74,7 +68,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       debounceTimerRef.current = null
     }
     setFormData(getInitialFormData())
-  }, [patientData.measurements])
+  }, [patientData?.measurements])
 
   useEffect(() => {
     return () => {
@@ -88,9 +82,9 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   useEffect(() => {
     if (patientData && selectedPersonId) {
       setPatientInfoFormData({
-        name: patientData.name || '',
-        gender: patientData.gender || '',
-        birthDate: patientData.birthDate || ''
+        name: patientData?.name || '',
+        gender: patientData?.gender || '',
+        birthDate: patientData?.birthDate || ''
       })
     } else if (!selectedPersonId) {
       setPatientInfoFormData({
@@ -115,12 +109,12 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   }
 
   const saveMeasurement = (newFormData) => {
-    if (!patientData.birthDate) {
+    if (!patientData?.birthDate) {
       alert('Birth date is required to calculate age. Please set the person\'s birth date first.')
       return
     }
     
-    const age = calculateAge(patientData.birthDate, newFormData.date)
+    const age = calculateAge(patientData?.birthDate, newFormData.date)
 
     if (!age) {
       alert('Age cannot be calculated. Please check the date.')
@@ -188,12 +182,12 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   const handleSaveInlineEdit = (id) => {
     if (!inlineEditData) return
     
-    if (!patientData.birthDate) {
+    if (!patientData?.birthDate) {
       alert('Birth date is required to calculate age. Please set the person\'s birth date first.')
       return
     }
     
-    const age = calculateAge(patientData.birthDate, inlineEditData.date)
+    const age = calculateAge(patientData?.birthDate, inlineEditData.date)
 
     if (!age) {
       alert('Age cannot be calculated. Please check the date.')
@@ -226,7 +220,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       tricepsSkinfold: inlineEditData.tricepsSkinfold ? parseFloat(inlineEditData.tricepsSkinfold) : null
     }
 
-    const duplicateIndex = patientData.measurements.findIndex(
+    const duplicateIndex = patientData?.measurements.findIndex(
       (m) => m.id !== id && m.date === measurement.date
     )
     
@@ -268,7 +262,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
     onDataUpdate({
       ...patientData,
       ...patientInfoFormData,
-      measurements: patientData.measurements || []
+      measurements: patientData?.measurements || []
     })
     setShowPatientInfo(false)
   }
@@ -361,9 +355,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
             <option value="__import__">📤 Import Data</option>
             {peopleList.length > 0 && <option disabled>──────────</option>}
             {peopleList.map(person => {
-              const personKey = getPersonKey(person.name, person.birthDate)
               return (
-                <option key={person.id} value={personKey}>
+                <option key={person.id} value={person.id}>
                   {person.name || 'Unnamed'} {person.birthDate ? `(${new Date(person.birthDate).toLocaleDateString()})` : ''} - {person.measurements?.length || 0} measurements
                 </option>
               )
@@ -560,9 +553,9 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                     type="button"
                     onClick={() => {
                       setPatientInfoFormData({
-                        name: (patientData && patientData.name) || '',
-                        gender: (patientData && patientData.gender) || '',
-                        birthDate: (patientData && patientData.birthDate) || ''
+                        name: (patientData && patientData?.name) || '',
+                        gender: (patientData && patientData?.gender) || '',
+                        birthDate: (patientData && patientData?.birthDate) || ''
                       })
                       setShowPatientInfo(false)
                     }}
@@ -599,7 +592,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
               )}
             </div>
 
-            {(!patientData || !patientData.measurements || patientData.measurements.length === 0) && (
+            {(!patientData || !patientData?.measurements || patientData?.measurements.length === 0) && (
               <div style={{ 
                 padding: '1rem', 
                 background: '#fff3cd', 
@@ -655,7 +648,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                     />
                   </div>
 
-                  {!patientData.birthDate && (
+                  {!patientData?.birthDate && (
                     <div style={{ 
                       padding: '0.75rem', 
                       background: '#fff3cd', 
@@ -789,9 +782,9 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
               </div>
             )}
 
-            {patientData && patientData.measurements && patientData.measurements.length > 0 && (
+            {patientData && patientData?.measurements && patientData?.measurements.length > 0 && (
               <div className="measurements-expandable">
-                {patientData.measurements.map((m) => {
+                {patientData?.measurements.map((m) => {
                   const mId = m.id || `${m.date}_${m.ageYears}`
                   const isExpanded = expandedRows.has(mId)
                   const isEditing = inlineEditingId === mId
@@ -905,8 +898,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Age</label>
                               {isEditing ? (
                                 <div style={{ padding: '0.5rem', color: '#666', fontSize: '0.9rem' }}>
-                                  {patientData.birthDate 
-                                    ? formatAge(calculateAge(patientData.birthDate, editData.date)?.years || 0)
+                                  {patientData?.birthDate 
+                                    ? formatAge(calculateAge(patientData?.birthDate, editData.date)?.years || 0)
                                     : 'Set DOB first'
                                   }
                                 </div>
