@@ -187,34 +187,6 @@ const createYAxisLabel = (labelText) => {
   }
 }
 
-// Custom label renderer for end of line labels - only shows at last point
-const createEndLabel = (name, color, isPatient = false) => {
-  return ({ viewBox, value, payload }) => {
-    // Only show label if there's a value and this is the last data point
-    if (value == null || !viewBox) return null
-    
-    // Check if this is the last point by seeing if payload exists and has ageYears
-    // We'll render the label at the right edge
-    const { x, y, width } = viewBox
-    const labelX = x + width + 5 // Position to the right of the chart
-    const labelY = y
-    
-    return (
-      <text
-        x={labelX}
-        y={labelY}
-        fill={color}
-        fontSize="11px"
-        fontWeight={isPatient ? 'bold' : 'normal'}
-        dominantBaseline="middle"
-        style={{ pointerEvents: 'none', userSelect: 'none' }}
-      >
-        {name}
-      </text>
-    )
-  }
-}
-
 // Custom Tooltip component that sorts items by percentile (highest first)
 const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter }) => {
   if (!active || !payload || !payload.length) return null
@@ -378,7 +350,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       const wfaRows = parseCsv(wfaText)
       const hcfaRows = parseCsv(hcfaText)
 
-      const wfaProcessed = wfaRows
+      let wfaProcessed = wfaRows
         .map(r => {
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
@@ -400,7 +372,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
 
-      const hcfaProcessed = hcfaRows
+      let hcfaProcessed = hcfaRows
         .map(r => {
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
@@ -440,7 +412,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               return Array.from(byMonth.values()).sort((a, b) => a.Month - b.Month)
             })()
 
-      const hfaProcessed = heightCombinedRows
+      let hfaProcessed = heightCombinedRows
         .map(r => {
           const ageYears = toAgeYears(r.Month)
           if (typeof ageYears !== 'number' || Number.isNaN(ageYears)) return null
@@ -461,6 +433,13 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         })
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
+
+      // Interpolate CDC data to whole months so lines align with markers
+      if (ageSource === 'cdc') {
+        wfaProcessed = interpolateCdcData(wfaProcessed)
+        hcfaProcessed = interpolateCdcData(hcfaProcessed)
+        hfaProcessed = interpolateCdcData(hfaProcessed)
+      }
 
       const wflRows = parseCsv(wflText)
       const wfhRows = parseCsv(wfhText)
@@ -899,18 +878,65 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     const ages = measurements.map(m => m.ageYears).filter(a => a != null)
     if (ages.length === 0) return [0, 5]
 
-    const minAge = 0 // Always start from 0, not from first measurement
+    const minAge = 0
     const maxAge = Math.max(...ages)
 
-    // Add some padding after max for readability
-    // For single measurements, ensure we show a reasonable range to see percentile curves
-    const range = Math.max(maxAge - minAge, 0.5)
-    const rightPadding = range * 0.1 // Add some padding on right too for single measurements
+    // For children under 2, we want to round to the nearest month
+    // Use a small epsilon to avoid floating point issues (e.g. 13.00001 months rounding to 14)
+    let finalMax
+    if (maxAge < 2) {
+      finalMax = Math.ceil(maxAge * 12 - 0.01) / 12
+    } else if (maxAge < 5) {
+      finalMax = Math.ceil(maxAge * 10 - 0.01) / 10
+    } else {
+      finalMax = Math.ceil(maxAge - 0.01)
+    }
 
-    return [
-      minAge, // Always start from 0
-      maxAge + rightPadding
-    ]
+    return [minAge, Math.max(finalMax, 0.5)]
+  }, [])
+
+  // Helper to interpolate CDC data to whole month boundaries for alignment with markers
+  const interpolateCdcData = useCallback((data) => {
+    if (!data || data.length < 2) return data
+    
+    const result = []
+    for (let i = 0; i < data.length - 1; i++) {
+      const current = data[i]
+      const next = data[i+1]
+      result.push(current)
+      
+      const currMonths = current.ageYears * 12
+      const nextMonths = next.ageYears * 12
+      
+      // Find all whole month boundaries between them
+      // Use epsilon to avoid precision issues
+      const startMonth = Math.floor(currMonths + 0.01) + 1
+      const endMonth = Math.ceil(nextMonths - 0.01) - 1
+      
+      for (let m = startMonth; m <= endMonth; m++) {
+        const targetAge = m / 12
+        const t = (targetAge - current.ageYears) / (next.ageYears - current.ageYears)
+        
+        const interpPoint = {
+          ageYears: targetAge
+        }
+        
+        Object.keys(current).forEach(key => {
+          if (key === 'ageYears') return
+          if (typeof current[key] === 'number' && typeof next[key] === 'number') {
+            interpPoint[key] = current[key] + t * (next[key] - current[key])
+          } else {
+            interpPoint[key] = current[key]
+          }
+        })
+        result.push(interpPoint)
+      }
+    }
+    result.push(data[data.length - 1])
+    
+    // Sort and de-duplicate by ageYears
+    return result.sort((a, b) => a.ageYears - b.ageYears)
+      .filter((v, i, a) => i === 0 || Math.abs(v.ageYears - a[i-1].ageYears) > 0.0001)
   }, [])
 
   const ageDomain = useMemo(() => calculateAgeDomain(patientData.measurements), [calculateAgeDomain, patientData.measurements])
@@ -989,9 +1015,16 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return match ? parseFloat(match[1]) : -1
   }, [])
 
-  // Optimized margins - minimal right margin for labels, maximum space for chart
+  // Optimized margins - enough space for percentile labels on the right
   const getChartMargins = useCallback(() => {
-    return { top: 5, right: 5, left: 5, bottom: 40 }
+    // Check if we're on mobile
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+    return { 
+      top: 10, 
+      right: isMobile ? 40 : 70, 
+      left: isMobile ? 10 : 40, 
+      bottom: 40 
+    }
   }, [])
 
   const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, chartData, measurements, getValue) => {
@@ -1384,6 +1417,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               <div className="spinner"></div>
             </div>
           ) : (
+          <div className="chart-scroll-wrapper">
           <ResponsiveContainer width="100%" height={400}>
             <LineChart 
               data={wfaChartData || []} 
@@ -1410,6 +1444,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData.measurements, m => m.weight)}
             </LineChart>
           </ResponsiveContainer>
+          </div>
           )}
         </div>
       )}
@@ -1423,6 +1458,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               <div className="spinner"></div>
             </div>
           ) : (
+          <div className="chart-scroll-wrapper">
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={hfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1445,6 +1481,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData.measurements, m => m.height)}
             </LineChart>
           </ResponsiveContainer>
+          </div>
           )}
         </div>
       )}
@@ -1458,6 +1495,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               <div className="spinner"></div>
             </div>
           ) : (
+          <div className="chart-scroll-wrapper">
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={hcfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1480,6 +1518,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData.measurements, m => m.headCircumference)}
             </LineChart>
           </ResponsiveContainer>
+          </div>
           )}
         </div>
       )}
@@ -1493,6 +1532,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               <div className="spinner"></div>
             </div>
           ) : (
+          <div className="chart-scroll-wrapper">
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={bmifaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1515,6 +1555,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi)}
             </LineChart>
           </ResponsiveContainer>
+          </div>
           )}
         </div>
       )}
@@ -1536,6 +1577,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   <div className="spinner"></div>
                 </div>
               ) : (
+              <div className="chart-scroll-wrapper">
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={acfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1555,6 +1597,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData.measurements, m => m.armCircumference)}
                 </LineChart>
               </ResponsiveContainer>
+              </div>
               )}
             </div>
           )}
@@ -1568,6 +1611,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   <div className="spinner"></div>
                 </div>
               ) : (
+              <div className="chart-scroll-wrapper">
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={ssfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1587,6 +1631,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData.measurements, m => m.subscapularSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
+              </div>
               )}
             </div>
           )}
@@ -1600,6 +1645,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   <div className="spinner"></div>
                 </div>
               ) : (
+              <div className="chart-scroll-wrapper">
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={tsfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1619,6 +1665,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData.measurements, m => m.tricepsSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
+              </div>
               )}
             </div>
           )}
@@ -1637,6 +1684,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 <div className="spinner"></div>
               </div>
             ) : (
+            <div className="chart-scroll-wrapper">
             <ResponsiveContainer width="100%" height={400}>
               <LineChart data={whChartData} margin={getChartMargins()} isAnimationActive={false}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -1657,6 +1705,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 {renderWeightForHeightLines(whChartData, patientData.measurements)}
               </LineChart>
             </ResponsiveContainer>
+            </div>
             )}
             <p className="chart-note" style={{fontSize: '0.8rem', color: '#666', marginTop: '10px'}}>
               Uses Weight-for-Length for &lt;85cm and Weight-for-Height/Stature for ≥85cm.

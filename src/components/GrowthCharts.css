@@ -40,6 +40,14 @@
   overflow: visible;
 }
 
+@media (max-width: 767px) {
+  .chart-container {
+    padding: 0.5rem 0.25rem;
+    background: #fff; /* Slightly cleaner for mobile */
+    border-radius: 4px;
+  }
+}
+
 .chart-container .recharts-wrapper {
   overflow: visible !important;
 }
@@ -61,6 +69,18 @@
   /* Ensure it fits mobile screens */
   max-width: 100%;
   box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  .chart-scroll-wrapper {
+    /* Allow charts to be wider than the viewport on mobile for readability */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .chart-container .recharts-responsive-container {
+    min-width: 500px; /* Force a minimum width so it's not too squished */
+  }
 }
 
 .chart-scroll-wrapper::-webkit-scrollbar {
