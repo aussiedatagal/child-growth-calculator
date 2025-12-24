@@ -70,11 +70,13 @@ global.FileReader = class FileReader {
   }
 
   readAsText(file) {
-    // Simulate async read
+    // Simulate async read - read file content
+    const self = this
     setTimeout(() => {
-      if (this.onload) {
-        this.onload({ target: { result: this.result } })
+      // In tests, we'll set the result via the test
+      if (self.onload && self.result !== null) {
+        self.onload({ target: { result: self.result } })
       }
-    }, 0)
+    }, 10)
   }
 }

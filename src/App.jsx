@@ -330,8 +330,12 @@ function App() {
     })
   }
 
-  const handleUpdateMeasurement = (updatedMeasurement) => {
+  const handleUpdateMeasurement = (id, updatedMeasurement) => {
     if (!selectedPersonId) return
+    
+    // The function is called with (id, measurement) from DataInputForm
+    // id is the measurement ID, updatedMeasurement is the measurement object
+    if (!id || !updatedMeasurement) return
     
     setPeople(prev => {
       const person = prev[selectedPersonId]
@@ -339,7 +343,7 @@ function App() {
       
       const existingMeasurements = person.measurements || []
       const updatedMeasurements = existingMeasurements.map(m => 
-        m.id === updatedMeasurement.id ? updatedMeasurement : m
+        m.id === id ? { ...updatedMeasurement, id } : m
       )
       
       // Sort measurements by date
