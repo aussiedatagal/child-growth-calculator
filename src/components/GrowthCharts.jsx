@@ -783,8 +783,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const getSourceLabel = useCallback((source) => (source === 'cdc' ? 'CDC' : 'WHO'), [])
 
   const calculateAgeDomain = useCallback((measurements) => {
-    // Always start from 0 to show full reference curves
-    if (!measurements || measurements.length === 0) return [0, 5] // Default to 0-5 years if no measurements
+    if (!measurements || measurements.length === 0) return [0, 5]
 
     const ages = measurements.map(m => m.ageYears).filter(a => a != null)
     if (ages.length === 0) return [0, 5]
@@ -792,8 +791,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     const minAge = 0
     const maxAge = Math.max(...ages)
 
-    // For children under 2, we want to round to the nearest month
-    // Use a small epsilon to avoid floating point issues (e.g. 13.00001 months rounding to 14)
     let finalMax
     if (maxAge < 2) {
       finalMax = Math.ceil(maxAge * 12 - 0.01) / 12
@@ -804,6 +801,45 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
 
     return [minAge, Math.max(finalMax, 0.5)]
+  }, [])
+
+  const calculateHeightDomain = useCallback((measurements) => {
+    if (!measurements || measurements.length === 0) return ['dataMin', 'dataMax']
+
+    const heights = measurements
+      .map(m => m.height)
+      .filter(h => h != null && h > 0)
+    
+    if (heights.length === 0) return ['dataMin', 'dataMax']
+
+    const minHeight = Math.min(...heights)
+    const maxHeight = Math.max(...heights)
+
+    const getTickInterval = (value) => {
+      if (value < 100) return 5
+      return 10
+    }
+
+    const roundDownToMarker = (value) => {
+      const interval = getTickInterval(value)
+      return Math.floor(value / interval) * interval
+    }
+
+    const roundUpToMarker = (value) => {
+      const interval = getTickInterval(value)
+      return Math.ceil(value / interval) * interval
+    }
+
+    const minInterval = getTickInterval(minHeight)
+    const maxInterval = getTickInterval(maxHeight)
+    
+    const nearestMarkerBelow = roundDownToMarker(minHeight)
+    const nearestMarkerAbove = roundUpToMarker(maxHeight)
+    
+    const minDomain = Math.max(0, nearestMarkerBelow - minInterval)
+    const maxDomain = nearestMarkerAbove + maxInterval
+
+    return [minDomain, maxDomain]
   }, [])
 
   // Helper to interpolate CDC data to whole month boundaries for alignment with markers
@@ -908,7 +944,21 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     prepareChartData(tsfaData, patientData?.measurements, 'patientTSFA', m => m.tricepsSkinfold),
     [prepareChartData, tsfaData, patientData?.measurements]
   )
-  const whChartData = useMemo(() => prepareWeightHeightData(), [prepareWeightHeightData])
+  const whChartDataRaw = useMemo(() => prepareWeightHeightData(), [prepareWeightHeightData])
+  
+  const heightDomain = useMemo(() => calculateHeightDomain(patientData?.measurements), [calculateHeightDomain, patientData?.measurements])
+  
+  const whChartData = useMemo(() => {
+    if (!whChartDataRaw || whChartDataRaw.length === 0) return []
+    if (!Array.isArray(heightDomain) || heightDomain.length !== 2) return whChartDataRaw
+    
+    const [minDomain, maxDomain] = heightDomain
+    if (typeof minDomain !== 'number' || typeof maxDomain !== 'number') return whChartDataRaw
+    
+    return whChartDataRaw.filter(item => 
+      item.height >= minDomain && item.height <= maxDomain
+    )
+  }, [whChartDataRaw, heightDomain])
   
   const wfaChartData = useMemo(() => filterDataByAge(wfaChartDataRaw), [filterDataByAge, wfaChartDataRaw])
   const hfaChartData = useMemo(() => filterDataByAge(hfaChartDataRaw), [filterDataByAge, hfaChartDataRaw])
@@ -1603,7 +1653,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   dataKey="height"
                   type="number"
                   scale="linear"
-                  domain={['dataMin', 'dataMax']}
+                  domain={heightDomain}
                   label={{ value: 'Height (cm)', position: 'insideBottom', offset: -10 }}
                   allowDataOverflow={false}
                   padding={{ left: 0, right: 0 }}

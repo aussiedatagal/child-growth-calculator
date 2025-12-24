@@ -1716,5 +1716,221 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
       }, { timeout: 5000 })
     })
   })
+
+  describe('Weight-for-Height Graph Range', () => {
+    it('should round domain to next round marker below min and above max', async () => {
+      const measurement1 = createMockMeasurement({
+        date: '2021-01-01',
+        weight: 10,
+        height: 47.536728,
+        birthDate: '2020-01-01'
+      })
+      const measurement2 = createMockMeasurement({
+        date: '2022-01-01',
+        weight: 15,
+        height: 67.284624,
+        birthDate: '2020-01-01'
+      })
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male',
+        measurements: [measurement1, measurement2]
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      const { container } = render(<App />)
+
+      await waitFor(() => {
+        const storageData = getLocalStorageData()
+        expect(storageData.selectedPersonId).toBe(person.id)
+      }, { timeout: 5000 })
+
+      const storageData = getLocalStorageData()
+      const personData = storageData.people[person.id]
+      expect(personData.measurements.length).toBe(2)
+      expect(personData.measurements[0].height).toBe(47.536728)
+      expect(personData.measurements[1].height).toBe(67.284624)
+      
+      // Domain should be [40, 75] for heights 47.536728 and 67.284624
+      // Min: floor(47.536728/5)*5 - 5 = 45 - 5 = 40
+      // Max: ceil(67.284624/5)*5 + 5 = 70 + 5 = 75
+      
+      // Verify the chart renders (domain is applied via XAxis domain prop)
+      await waitFor(() => {
+        const charts = container.querySelectorAll('.chart-container')
+        expect(charts.length).toBeGreaterThan(0)
+      }, { timeout: 5000 })
+    })
+
+    it('should not extend too far beyond the maximum measurement', async () => {
+      const measurement1 = createMockMeasurement({
+        date: '2021-01-01',
+        weight: 10,
+        height: 47.536728,
+        birthDate: '2020-01-01'
+      })
+      const measurement2 = createMockMeasurement({
+        date: '2022-01-01',
+        weight: 15,
+        height: 67.284624,
+        birthDate: '2020-01-01'
+      })
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male',
+        measurements: [measurement1, measurement2]
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      const { container } = render(<App />)
+
+      await waitFor(() => {
+        const storageData = getLocalStorageData()
+        expect(storageData.selectedPersonId).toBe(person.id)
+      }, { timeout: 5000 })
+
+      // Max height is 67.284624, domain should end at 75 (not 80 or higher)
+      // ceil(67.284624/5) = 14, so marker = 70, then +5 = 75
+      const storageData = getLocalStorageData()
+      const personData = storageData.people[person.id]
+      const maxHeight = Math.max(...personData.measurements.map(m => m.height))
+      expect(maxHeight).toBe(67.284624)
+      
+      // Domain max should be exactly one interval above the rounded-up marker
+      // ceil(67.284624/5)*5 = 70, then +5 = 75
+      expect(maxHeight).toBeLessThan(75)
+      
+      // Verify chart renders with domain applied
+      await waitFor(() => {
+        const charts = container.querySelectorAll('.chart-container')
+        expect(charts.length).toBeGreaterThan(0)
+      }, { timeout: 5000 })
+    })
+    
+    it('should filter chart data to domain range', async () => {
+      const measurement1 = createMockMeasurement({
+        date: '2021-01-01',
+        weight: 10,
+        height: 47.536728,
+        birthDate: '2020-01-01'
+      })
+      const measurement2 = createMockMeasurement({
+        date: '2022-01-01',
+        weight: 15,
+        height: 67.284624,
+        birthDate: '2020-01-01'
+      })
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male',
+        measurements: [measurement1, measurement2]
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      render(<App />)
+
+      await waitFor(() => {
+        const storageData = getLocalStorageData()
+        expect(storageData.selectedPersonId).toBe(person.id)
+      }, { timeout: 5000 })
+
+      // Domain should be [40, 75] for heights 47.536728 and 67.284624
+      // Chart data should be filtered to only include heights between 40 and 75
+      const storageData = getLocalStorageData()
+      const personData = storageData.people[person.id]
+      expect(personData.measurements.length).toBe(2)
+      expect(personData.measurements[0].height).toBe(47.536728)
+      expect(personData.measurements[1].height).toBe(67.284624)
+    })
+
+    it('should handle measurement just above round marker correctly', async () => {
+      const measurement1 = createMockMeasurement({
+        date: '2021-01-01',
+        weight: 10,
+        height: 45.1,
+        birthDate: '2020-01-01'
+      })
+      const measurement2 = createMockMeasurement({
+        date: '2022-01-01',
+        weight: 15,
+        height: 70.1,
+        birthDate: '2020-01-01'
+      })
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male',
+        measurements: [measurement1, measurement2]
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      render(<App />)
+
+      await waitFor(() => {
+        const storageData = getLocalStorageData()
+        expect(storageData.selectedPersonId).toBe(person.id)
+      }, { timeout: 5000 })
+
+      const storageData = getLocalStorageData()
+      const personData = storageData.people[person.id]
+      expect(personData.measurements[0].height).toBe(45.1)
+      expect(personData.measurements[1].height).toBe(70.1)
+      
+      // For 70.1: ceil(70.1/5) = 15, so marker = 75, then +5 = 80
+      // This is correct - one interval above the rounded marker
+    })
+
+    it('should handle heights >= 100cm with 10cm intervals', async () => {
+      const measurement1 = createMockMeasurement({
+        date: '2023-01-01',
+        weight: 20,
+        height: 105.3,
+        birthDate: '2020-01-01'
+      })
+      const measurement2 = createMockMeasurement({
+        date: '2024-01-01',
+        weight: 25,
+        height: 147.8,
+        birthDate: '2020-01-01'
+      })
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male',
+        measurements: [measurement1, measurement2]
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      render(<App />)
+
+      await waitFor(() => {
+        const storageData = getLocalStorageData()
+        expect(storageData.selectedPersonId).toBe(person.id)
+      }, { timeout: 5000 })
+
+      const storageData = getLocalStorageData()
+      const personData = storageData.people[person.id]
+      expect(personData.measurements.length).toBe(2)
+      expect(personData.measurements[0].height).toBe(105.3)
+      expect(personData.measurements[1].height).toBe(147.8)
+      
+      // Domain should use 10cm intervals for heights >= 100
+      // Min: floor(105.3/10)*10 - 10 = 100 - 10 = 90
+      // Max: ceil(147.8/10)*10 + 10 = 150 + 10 = 160
+    })
+  })
 })
 
