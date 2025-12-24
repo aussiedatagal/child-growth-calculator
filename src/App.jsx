@@ -1,102 +1,46 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import './App.css'
 import DataInputForm from './components/DataInputForm'
 import GrowthCharts from './components/GrowthCharts'
 import BoxWhiskerPlots from './components/BoxWhiskerPlots'
-
-// Generate a unique ID for a person based on name and DOB
-const getPersonId = (name, birthDate) => {
-  return `${name || 'Unnamed'}_${birthDate || 'NoDOB'}_${Date.now()}`
-}
-
-const calculateAge = (birthDate, measurementDate) => {
-  if (!birthDate || !measurementDate) return null
-  
-  const birth = new Date(birthDate)
-  const measure = new Date(measurementDate)
-  const diffTime = measure - birth
-  const diffDays = diffTime / (1000 * 60 * 60 * 24)
-  const years = diffDays / 365.25
-  const months = years * 12
-  
-  return { years, months, days: diffDays }
-}
-
-// Helper to recalculate all measurement ages for a person
-const recalculatePersonAges = (person) => {
-  if (!person || !person.birthDate || !person.measurements) return person
-  
-  const updatedMeasurements = person.measurements.map(m => {
-    if (person.birthDate && m.date) {
-      const age = calculateAge(person.birthDate, m.date)
-      return {
-        ...m,
-        ageYears: age ? age.years : m.ageYears,
-        ageMonths: age ? age.months : m.ageMonths
-      }
-    }
-    return m
-  })
-
-  return {
-    ...person,
-    measurements: updatedMeasurements
-  }
-}
+import { getPersonId, calculateAge, recalculatePersonAges } from './utils/personUtils'
 
 function App() {
   const [people, setPeople] = useState(() => {
     const saved = localStorage.getItem('growthChartPeople')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        // Migrate old format to new format
-        if (parsed.name || parsed.gender || parsed.birthDate || parsed.measurements) {
-          // Old single-person format - convert to new format
-          const id = getPersonId(parsed.name, parsed.birthDate)
-          const rawMeasurements = parsed.measurements || (parsed.measurement ? [parsed.measurement] : [])
-          
-          // Ensure measurements have IDs
-          const measurements = rawMeasurements.map(m => ({
+    if (!saved) return {}
+    
+    try {
+      const parsed = JSON.parse(saved)
+      
+      if (parsed.name || parsed.gender || parsed.birthDate || parsed.measurements) {
+        const id = getPersonId(parsed.name, parsed.birthDate)
+        const measurements = (parsed.measurements || (parsed.measurement ? [parsed.measurement] : [])).map(m => ({
+          ...m,
+          id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+        }))
+        return {
+          [id]: { id, name: parsed.name || '', gender: parsed.gender || '', birthDate: parsed.birthDate || '', measurements }
+        }
+      }
+      
+      const migrated = {}
+      Object.keys(parsed).forEach(key => {
+        const person = parsed[key]
+        const id = person.id || key
+        if (person.measurements) {
+          person.measurements = person.measurements.map(m => ({
             ...m,
             id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
           }))
-
-          return {
-            [id]: {
-              id,
-              name: parsed.name || '',
-              gender: parsed.gender || '',
-              birthDate: parsed.birthDate || '',
-              measurements: measurements
-            }
-          }
         }
-        
-        // Ensure all people in the new format have stable IDs and use ID as key
-        const migratedPeople = {}
-        Object.keys(parsed).forEach(key => {
-          const person = parsed[key]
-          const id = person.id || key
-          
-          if (person.measurements) {
-            person.measurements = person.measurements.map(m => ({
-              ...m,
-              id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
-            }))
-          }
-          
-          migratedPeople[id] = {
-            ...person,
-            id
-          }
-        })
-        return migratedPeople
-      } catch (e) {
-        console.error('Error loading saved people:', e)
-      }
+        migrated[id] = { ...person, id }
+      })
+      return migrated
+    } catch (e) {
+      console.error('Error loading saved people:', e)
+      return {}
     }
-    return {}
   })
 
   const [selectedPersonId, setSelectedPersonId] = useState(() => {
@@ -118,55 +62,31 @@ function App() {
     return { age: 'who', wfh: 'who' }
   })
 
-  // Derived patient data - recalculate ages on the fly
   const patientData = useMemo(() => {
-    if (selectedPersonId) {
-      let person = people[selectedPersonId]
-      
-      // Fallback: If person not found by ID key, try to find by ID property
-      if (!person) {
-        person = Object.values(people).find(p => p.id === selectedPersonId)
+    if (!selectedPersonId) return null
+    
+    let person = people[selectedPersonId] || 
+                 Object.values(people).find(p => p.id === selectedPersonId) ||
+                 Object.values(people).find(p => `${(p.name || '').trim()}_${p.birthDate || ''}` === selectedPersonId)
+    
+    if (!person) return null
+    
+    const measurements = Array.isArray(person.measurements) ? person.measurements : []
+    const updatedMeasurements = measurements.map(m => {
+      if (person.birthDate && m.date) {
+        const age = calculateAge(person.birthDate, m.date)
+        return { ...m, ageYears: age?.years ?? m.ageYears, ageMonths: age?.months ?? m.ageMonths }
       }
-
-      // Secondary fallback: If still not found, check if it's an old personKey
-      if (!person) {
-        person = Object.values(people).find(p => {
-          const personKey = `${(p.name || '').trim()}_${p.birthDate || ''}`
-          return personKey === selectedPersonId
-        })
-      }
-      
-      if (person) {
-        const measurements = Array.isArray(person.measurements) ? person.measurements : []
-        
-        // Recalculate ages based on current birthDate
-        const updatedMeasurements = measurements.map(m => {
-          if (person.birthDate && m.date) {
-            const age = calculateAge(person.birthDate, m.date)
-            return {
-              ...m,
-              ageYears: age ? age.years : m.ageYears,
-              ageMonths: age ? age.months : m.ageMonths
-            }
-          }
-          return m
-        })
-
-        return {
-          ...person,
-          measurements: updatedMeasurements
-        }
-      }
-    }
-    return null
+      return m
+    })
+    
+    return { ...person, measurements: updatedMeasurements }
   }, [selectedPersonId, people])
 
-  // Save people to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('growthChartPeople', JSON.stringify(people))
   }, [people])
 
-  // Save selected person ID
   useEffect(() => {
     if (selectedPersonId) {
       localStorage.setItem('growthChartSelectedPerson', selectedPersonId)
@@ -175,16 +95,13 @@ function App() {
     }
   }, [selectedPersonId])
 
-  // Normalize selectedPersonId if it's an old key or mismatch
   useEffect(() => {
     if (selectedPersonId && !people[selectedPersonId]) {
       const person = Object.values(people).find(p => 
         p.id === selectedPersonId || 
         `${(p.name || '').trim()}_${p.birthDate || ''}` === selectedPersonId
       )
-      if (person) {
-        setSelectedPersonId(person.id)
-      }
+      if (person) setSelectedPersonId(person.id)
     }
   }, [selectedPersonId, people])
 
@@ -298,63 +215,40 @@ function App() {
       const person = prev[selectedPersonId]
       if (!person) return prev
       
-      const existingMeasurements = person.measurements || []
-      
-      // Ensure the new measurement has a unique ID if it doesn't already
       const newMeasurement = {
         ...measurement,
         id: measurement.id || `${measurement.date}_${Math.random().toString(36).substr(2, 9)}`
       }
       
-      // Add or update measurement
-      const measurementIndex = existingMeasurements.findIndex(m => m.id === newMeasurement.id)
-      let updatedMeasurements
+      const existing = person.measurements || []
+      const index = existing.findIndex(m => m.id === newMeasurement.id)
+      const updated = index > -1 
+        ? existing.map((m, i) => i === index ? newMeasurement : m)
+        : [...existing, newMeasurement]
       
-      if (measurementIndex > -1) {
-        updatedMeasurements = [...existingMeasurements]
-        updatedMeasurements[measurementIndex] = newMeasurement
-      } else {
-        updatedMeasurements = [...existingMeasurements, newMeasurement]
-      }
-      
-      // Sort measurements by date
-      updatedMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      updated.sort((a, b) => new Date(a.date) - new Date(b.date))
       
       return {
         ...prev,
-        [selectedPersonId]: {
-          ...person,
-          measurements: updatedMeasurements
-        }
+        [selectedPersonId]: { ...person, measurements: updated }
       }
     })
   }
 
   const handleUpdateMeasurement = (id, updatedMeasurement) => {
-    if (!selectedPersonId) return
-    
-    // The function is called with (id, measurement) from DataInputForm
-    // id is the measurement ID, updatedMeasurement is the measurement object
-    if (!id || !updatedMeasurement) return
+    if (!selectedPersonId || !id || !updatedMeasurement) return
     
     setPeople(prev => {
       const person = prev[selectedPersonId]
       if (!person) return prev
       
-      const existingMeasurements = person.measurements || []
-      const updatedMeasurements = existingMeasurements.map(m => 
+      const updated = (person.measurements || []).map(m => 
         m.id === id ? { ...updatedMeasurement, id } : m
-      )
-      
-      // Sort measurements by date
-      updatedMeasurements.sort((a, b) => new Date(a.date) - new Date(b.date))
+      ).sort((a, b) => new Date(a.date) - new Date(b.date))
       
       return {
         ...prev,
-        [selectedPersonId]: {
-          ...person,
-          measurements: updatedMeasurements
-        }
+        [selectedPersonId]: { ...person, measurements: updated }
       }
     })
   }
@@ -366,13 +260,11 @@ function App() {
       const person = prev[selectedPersonId]
       if (!person) return prev
       
-      const newMeasurements = (person.measurements || []).filter(m => m.id !== id)
-      
       return {
         ...prev,
         [selectedPersonId]: {
           ...person,
-          measurements: newMeasurements
+          measurements: (person.measurements || []).filter(m => m.id !== id)
         }
       }
     })
