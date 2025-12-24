@@ -117,6 +117,24 @@
   margin-top: 2rem;
 }
 
+.byline {
+  font-size: 0.85rem;
+  color: #888;
+  margin-top: 0.25rem;
+  display: inline-block;
+}
+
+.byline a {
+  color: #888;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.byline a:hover {
+  color: #667eea;
+  text-decoration: underline;
+}
+
 @media (max-width: 767px) {
   .app-header {
     padding: 0.75rem 1rem;

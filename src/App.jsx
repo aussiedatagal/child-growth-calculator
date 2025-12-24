@@ -406,6 +406,8 @@ function App() {
           Track and visualize growth measurements using WHO and CDC references.
           <br />
           Data sources: <a href="https://www.who.int/toolkits/child-growth-standards/standards" target="_blank" rel="noopener noreferrer">WHO Child Growth Standards</a> · <a href="https://www.cdc.gov/growthcharts/data_tables.htm" target="_blank" rel="noopener noreferrer">CDC Growth Charts data files</a>
+          <br />
+          <span className="byline">by <a href="https://aussiedatagal.github.io/" target="_blank" rel="noopener noreferrer">Aussie Data Gal</a></span>
         </p>
       </header>
       
