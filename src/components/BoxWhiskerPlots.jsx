@@ -570,7 +570,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         </h3>
         <div className="box-plot-content">
           <div className="box-plot-visual">
-            <svg width="100%" height="200" viewBox="0 0 380 200" preserveAspectRatio="none">
+            <svg width="100%" height="200" viewBox="0 0 380 200" preserveAspectRatio="xMidYMid meet" style={{ maxWidth: '100%', height: 'auto' }}>
               <line x1="40" y1="10" x2="40" y2="190" stroke="#333" strokeWidth="2" />
               <line x1="40" y1="190" x2="340" y2="190" stroke="#333" strokeWidth="2" />
               

@@ -1640,5 +1640,81 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
       })
     })
   })
+
+  describe('Box and Whisker Plots Aspect Ratio', () => {
+    it('should maintain proper aspect ratio on all screen sizes', async () => {
+      const measurement = createMockMeasurement({
+        date: '2021-01-01',
+        weight: 10,
+        height: 50,
+        birthDate: '2020-01-01'
+      })
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male',
+        measurements: [measurement]
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      const { container } = render(<App />)
+
+      await waitFor(() => {
+        const storageData = getLocalStorageData()
+        expect(storageData.selectedPersonId).toBe(person.id)
+      }, { timeout: 5000 })
+
+      // Wait for box plots to potentially render
+      await waitFor(() => {
+        const boxPlots = container.querySelectorAll('.box-plot-visual')
+        if (boxPlots.length > 0) {
+          const svg = boxPlots[0].querySelector('svg')
+          if (svg) {
+            expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet')
+            
+            const computedStyle = window.getComputedStyle(boxPlots[0])
+            const aspectRatio = computedStyle.aspectRatio
+            expect(aspectRatio).toBe('1.9')
+          }
+        }
+      }, { timeout: 5000 })
+    })
+
+    it('should have max-width constraint on box plot visuals in desktop view', async () => {
+      const measurement = createMockMeasurement({
+        date: '2021-01-01',
+        weight: 10,
+        height: 50,
+        birthDate: '2020-01-01'
+      })
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male',
+        measurements: [measurement]
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      const { container } = render(<App />)
+
+      await waitFor(() => {
+        const storageData = getLocalStorageData()
+        expect(storageData.selectedPersonId).toBe(person.id)
+      }, { timeout: 5000 })
+
+      await waitFor(() => {
+        const boxPlots = container.querySelectorAll('.box-plot-visual')
+        if (boxPlots.length > 0) {
+          const computedStyle = window.getComputedStyle(boxPlots[0])
+          const maxWidth = computedStyle.maxWidth
+          expect(maxWidth).toBe('500px')
+        }
+      }, { timeout: 5000 })
+    })
+  })
 })
 

@@ -1,6 +1,7 @@
 .box-whisker-plots {
   width: 100%;
   margin-top: 2rem;
+  overflow-x: hidden;
 }
 
 .box-whisker-plots h2 {
@@ -63,6 +64,9 @@
   padding: 1rem;
   border: 1px solid #e0e0e0;
   min-width: 300px;
+  max-width: 500px;
+  aspect-ratio: 1.9;
+  overflow: hidden;
 }
 
 @media (max-width: 767px) {
@@ -75,7 +79,22 @@
   }
 
   .box-plot-visual {
-    min-width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    padding: 0.5rem;
+    box-sizing: border-box;
+  }
+  
+  .box-plots-container {
+    overflow-x: hidden;
+    width: 100%;
+  }
+  
+  .box-plot-item {
+    overflow-x: hidden;
+    width: 100%;
+    box-sizing: border-box;
   }
 }
 
