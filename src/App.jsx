@@ -109,7 +109,7 @@ function App() {
     localStorage.setItem('growthChartSources', JSON.stringify(referenceSources))
   }, [referenceSources])
 
-  const handleAddPerson = (name, birthDate, gender) => {
+  const handleAddPerson = (name, birthDate, gender, gestationalAgeAtBirth = 40) => {
     // Check if person already exists
     const existingPerson = Object.values(people).find(
       p => (p.name || '').trim() === (name || '').trim() && p.birthDate === birthDate
@@ -128,6 +128,7 @@ function App() {
       name: name || '',
       gender: gender || '',
       birthDate: birthDate || '',
+      gestationalAgeAtBirth: gestationalAgeAtBirth || 40,
       measurements: []
     }
 
@@ -352,17 +353,31 @@ function App() {
             
             const mergedMeasurements = Array.from(measurementMap.values()).sort((a, b) => new Date(a.date) - new Date(b.date))
             
-            merged[id] = recalculatePersonAges({
+            // Ensure gestationalAgeAtBirth is a number, not a string
+            const personToMerge = {
               ...existing,
               ...importedPerson,
               id,
-              measurements: mergedMeasurements
-            })
+              measurements: mergedMeasurements,
+              gestationalAgeAtBirth: importedPerson.gestationalAgeAtBirth != null 
+                ? (typeof importedPerson.gestationalAgeAtBirth === 'string' 
+                    ? parseFloat(importedPerson.gestationalAgeAtBirth) 
+                    : importedPerson.gestationalAgeAtBirth)
+                : existing.gestationalAgeAtBirth || 40
+            }
+            merged[id] = recalculatePersonAges(personToMerge)
           } else {
-            merged[id] = recalculatePersonAges({
+            // Ensure gestationalAgeAtBirth is a number, not a string
+            const personToAdd = {
               ...importedPerson,
-              id
-            })
+              id,
+              gestationalAgeAtBirth: importedPerson.gestationalAgeAtBirth != null 
+                ? (typeof importedPerson.gestationalAgeAtBirth === 'string' 
+                    ? parseFloat(importedPerson.gestationalAgeAtBirth) 
+                    : importedPerson.gestationalAgeAtBirth)
+                : 40
+            }
+            merged[id] = recalculatePersonAges(personToAdd)
             // Track the first newly imported person
             if (firstNewPersonId === null) {
               firstNewPersonId = id
@@ -403,9 +418,7 @@ function App() {
       <header className="app-header">
         <h1>Growth Chart Calculator</h1>
         <p className="subtitle">
-          Track and visualize growth measurements using WHO and CDC references.
-          <br />
-          Data sources: <a href="https://www.who.int/toolkits/child-growth-standards/standards" target="_blank" rel="noopener noreferrer">WHO Child Growth Standards</a> · <a href="https://www.cdc.gov/growthcharts/data_tables.htm" target="_blank" rel="noopener noreferrer">CDC Growth Charts data files</a>
+          Track and visualize growth measurements using WHO, CDC, and Fenton references.
           <br />
           <span className="byline">by <a href="https://aussiedatagal.github.io/" target="_blank" rel="noopener noreferrer">Aussie Data Gal</a></span>
         </p>
@@ -452,7 +465,7 @@ function App() {
       
       <footer className="app-footer">
         <p>
-          Growth reference data from <a href="https://www.who.int/toolkits/child-growth-standards" target="_blank" rel="noopener noreferrer">WHO</a> and <a href="https://www.cdc.gov/growthcharts/index.htm" target="_blank" rel="noopener noreferrer">CDC</a>. 
+          Growth reference data from <a href="https://www.who.int/toolkits/child-growth-standards" target="_blank" rel="noopener noreferrer">WHO</a>, <a href="https://www.cdc.gov/growthcharts/index.htm" target="_blank" rel="noopener noreferrer">CDC</a>, and <a href="https://ucalgary.ca/resource/preterm-growth-chart/preterm-growth-chart" target="_blank" rel="noopener noreferrer">Fenton 2025 Preterm Growth Charts</a> (University of Calgary, CC BY-NC-ND 4.0). 
           Please refer to their respective terms of use for data licensing requirements.
         </p>
         <p>

@@ -28,19 +28,19 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       const ageSource = referenceSources?.age || 'who'
       const baseUrl = import.meta.env.BASE_URL
 
-      const wfaPath = `${baseUrl}wfa_${gKey}_${ageSource}.csv`
-      const hcfaPath = `${baseUrl}hcfa_${gKey}_${ageSource}.csv`
+      const wfaPath = `${baseUrl}data/wfa_${gKey}_${ageSource}.csv`
+      const hcfaPath = `${baseUrl}data/hcfa_${gKey}_${ageSource}.csv`
       const heightPaths =
         ageSource === 'who'
-          ? [`${baseUrl}lhfa_${gKey}_who.csv`]
-          : [`${baseUrl}lhfa_${gKey}_cdc.csv`, `${baseUrl}hfa_${gKey}_cdc.csv`]
+          ? [`${baseUrl}data/lhfa_${gKey}_who.csv`]
+          : [`${baseUrl}data/lhfa_${gKey}_cdc.csv`, `${baseUrl}data/hfa_${gKey}_cdc.csv`]
 
-      const wflPath = `${baseUrl}wfl_${gKey}_${ageSource}.csv`
-      const wfhPath = `${baseUrl}wfh_${gKey}_${ageSource}.csv`
-      const bmifaPath = `${baseUrl}bmifa_${gKey}_who.csv` // BMI-for-age only available from WHO
-      const acfaPath = `${baseUrl}acfa_${gKey}_who.csv`   // arm circumference-for-age (WHO only)
-      const ssfaPath = `${baseUrl}ssfa_${gKey}_who.csv`   // subscapular skinfold-for-age (WHO only)
-      const tsfaPath = `${baseUrl}tsfa_${gKey}_who.csv`   // triceps skinfold-for-age (WHO only)
+      const wflPath = `${baseUrl}data/wfl_${gKey}_${ageSource}.csv`
+      const wfhPath = `${baseUrl}data/wfh_${gKey}_${ageSource}.csv`
+      const bmifaPath = `${baseUrl}data/bmifa_${gKey}_who.csv` // BMI-for-age only available from WHO
+      const acfaPath = `${baseUrl}data/acfa_${gKey}_who.csv`   // arm circumference-for-age (WHO only)
+      const ssfaPath = `${baseUrl}data/ssfa_${gKey}_who.csv`   // subscapular skinfold-for-age (WHO only)
+      const tsfaPath = `${baseUrl}data/tsfa_${gKey}_who.csv`   // triceps skinfold-for-age (WHO only)
 
       const fetchAll = await Promise.all([
         fetch(wfaPath),

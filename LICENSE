@@ -26,6 +26,11 @@ Data Attribution:
 This software uses growth reference data from:
 - WHO Child Growth Standards (https://www.who.int/tools/child-growth-standards/standards)
 - CDC Growth Charts (https://www.cdc.gov/growthcharts/cdc-data-files.htm)
+- Fenton 2025 Preterm Growth Charts (https://ucalgary.ca/resource/preterm-growth-chart/preterm-growth-chart)
+  - Licensed under Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License (CC BY-NC-ND 4.0)
+  - Data source: "2025SizeatBirthCalculatorFentonGrowthmeta-analysisv1CCL.xlsx" from University of Calgary
+  - Based on Fenton et al. (2025) meta-analysis
+  - **Note: Non-commercial use only**
 
 The data files are subject to the respective organizations' terms of use.
-Please refer to WHO and CDC websites for their data licensing requirements.
+Please refer to WHO, CDC, and University of Calgary websites for their data licensing requirements.

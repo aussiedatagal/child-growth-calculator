@@ -35,7 +35,14 @@ global.fetch = vi.fn((url) => {
 afterEach(() => {
   cleanup()
   // Clear localStorage after each test
-  localStorage.clear()
+  if (typeof localStorage !== 'undefined' && localStorage.clear) {
+    localStorage.clear()
+  } else if (typeof localStorage !== 'undefined') {
+    // Fallback: clear all keys
+    Object.keys(localStorage).forEach(key => {
+      localStorage.removeItem(key)
+    })
+  }
   // Reset fetch mock
   vi.clearAllMocks()
 })
