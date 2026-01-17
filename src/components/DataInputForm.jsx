@@ -27,6 +27,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   const [newPersonName, setNewPersonName] = useState('')
   const [newPersonDOB, setNewPersonDOB] = useState('')
   const [newPersonGender, setNewPersonGender] = useState('')
+  const [newPersonGA, setNewPersonGA] = useState('40')
   const getInitialFormData = () => {
     return {
       date: new Date().toISOString().split('T')[0],
@@ -58,7 +59,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   const [patientInfoFormData, setPatientInfoFormData] = useState({
     name: '',
     gender: '',
-    birthDate: ''
+    birthDate: '',
+    gestationalAgeAtBirth: ''
   })
   const debounceTimerRef = useRef(null)
 
@@ -84,13 +86,15 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       setPatientInfoFormData({
         name: patientData?.name || '',
         gender: patientData?.gender || '',
-        birthDate: patientData?.birthDate || ''
+        birthDate: patientData?.birthDate || '',
+        gestationalAgeAtBirth: patientData?.gestationalAgeAtBirth || ''
       })
     } else if (!selectedPersonId) {
       setPatientInfoFormData({
         name: '',
         gender: '',
-        birthDate: ''
+        birthDate: '',
+        gestationalAgeAtBirth: ''
       })
     }
   }, [patientData, selectedPersonId])
@@ -274,10 +278,12 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       alert('Please fill in name, birth date, and gender')
       return
     }
-    onAddPerson(newPersonName.trim(), newPersonDOB, newPersonGender)
+    const ga = newPersonGA ? parseFloat(newPersonGA) : 40
+    onAddPerson(newPersonName.trim(), newPersonDOB, newPersonGender, ga)
     setNewPersonName('')
     setNewPersonDOB('')
     setNewPersonGender('')
+    setNewPersonGA('40')
     setShowAddPersonForm(false)
   }
 
@@ -414,6 +420,20 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
               />
             </div>
             <div className="form-group">
+              <label htmlFor="newPersonGA">Gestational Age at Birth (weeks)</label>
+              <input
+                type="number"
+                id="newPersonGA"
+                value={newPersonGA}
+                onChange={(e) => setNewPersonGA(e.target.value)}
+                min="22"
+                max="45"
+                step="0.1"
+                placeholder="40 (for term infants)"
+              />
+              <small>Enter gestational age in weeks (22-45). Default is 40 weeks for term infants.</small>
+            </div>
+            <div className="form-group">
               <label htmlFor="newPersonGender">Gender *</label>
               <select
                 id="newPersonGender"
@@ -437,6 +457,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                   setNewPersonName('')
                   setNewPersonDOB('')
                   setNewPersonGender('')
+                  setNewPersonGA('40')
                 }}
                 className="submit-btn"
                 style={{
@@ -540,6 +561,22 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                   <small>Or enter age manually below</small>
                 </div>
 
+                <div className="form-group">
+                  <label htmlFor="gestationalAgeAtBirth">Gestational Age at Birth (weeks)</label>
+                  <input
+                    type="number"
+                    id="gestationalAgeAtBirth"
+                    name="gestationalAgeAtBirth"
+                    value={patientInfoFormData.gestationalAgeAtBirth}
+                    onChange={handlePatientInfoChange}
+                    min="22"
+                    max="45"
+                    step="0.1"
+                    placeholder="40 (for term infants)"
+                  />
+                  <small>Enter gestational age in weeks (22-45). Default is 40 weeks for term infants. Required for preemie growth tracking.</small>
+                </div>
+
                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
                   <button
                     type="button"
@@ -555,7 +592,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       setPatientInfoFormData({
                         name: (patientData && patientData?.name) || '',
                         gender: (patientData && patientData?.gender) || '',
-                        birthDate: (patientData && patientData?.birthDate) || ''
+                        birthDate: (patientData && patientData?.birthDate) || '',
+                        gestationalAgeAtBirth: (patientData && patientData?.gestationalAgeAtBirth) || ''
                       })
                       setShowPatientInfo(false)
                     }}

@@ -1,14 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, memo } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LabelList } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LabelList, ReferenceLine, Tooltip } from 'recharts'
 import './GrowthCharts.css'
 import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, formatAgeLabel, calculateBMI } from '../utils/chartUtils'
+import { calculateCorrectedAge } from '../utils/personUtils'
 
 const AGE_SOURCES = [
   { value: 'who', label: 'WHO' },
   { value: 'cdc', label: 'CDC' },
 ]
 
-// Helper function to extract numeric percentile from label
 const getNumericPercentileFromLabel = (label) => {
   if (!label) return -1
   if (label.includes('>')) return 100
@@ -28,11 +28,7 @@ const OrderedLegend = memo(({ payload, percentiles = ['97th', '85th', '75th', '5
     let percentile = -1
     const isStandardPercentile = percentiles.some(p => label === p || label.startsWith(p))
     
-    // Extract percentile from label (works for both standard and patient percentiles)
     percentile = getNumericPercentileFromLabel(label)
-    
-    // If it's a percentile (standard or patient), include it
-    // Patient lines are identified by: black color (#000) and non-standard percentile
     const isPatient = item.color === '#000' && percentile >= 0 && !isStandardPercentile
     
     if (percentile >= 0 || isPatient) {
@@ -40,12 +36,9 @@ const OrderedLegend = memo(({ payload, percentiles = ['97th', '85th', '75th', '5
     }
   })
   
-  // Sort by percentile in descending order (highest first)
   allItems.sort((a, b) => {
-    // Patient items should be sorted by their percentile value
-    // If percentiles are equal, keep original order
     if (a.percentile !== b.percentile) {
-      return b.percentile - a.percentile // Descending order
+      return b.percentile - a.percentile
     }
     return 0
   })
@@ -83,16 +76,12 @@ const OrderedLegend = memo(({ payload, percentiles = ['97th', '85th', '75th', '5
   )
 })
 
-// Custom Y-axis label component factory for better vertical centering of longer labels
 const createYAxisLabel = (labelText) => {
   return (props) => {
-    // Recharts passes viewBox
     const { viewBox } = props
     
     if (!viewBox) return null
     const { x, y, height } = viewBox
-    // Center the label vertically in the Y-axis area (shift down)
-    // Position closer to the axis - use a smaller offset from x
     const labelX = x + 5
     const labelY = y + height / 2
     
@@ -112,18 +101,22 @@ const createYAxisLabel = (labelText) => {
   }
 }
 
-// Custom Tooltip component that sorts items by percentile (highest first)
-const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter }) => {
+// Helper to ensure gestationalAgeAtBirth is always a number
+const getGestationalAge = (patientData) => {
+  if (!patientData?.gestationalAgeAtBirth) return 40
+  return typeof patientData.gestationalAgeAtBirth === 'string' 
+    ? parseFloat(patientData.gestationalAgeAtBirth) 
+    : patientData.gestationalAgeAtBirth
+}
+
+const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter, chartType, patientData }) => {
   if (!active || !payload || !payload.length) return null
   
-  // Sort payload by percentile value (descending - highest first)
   const sortedPayload = [...payload].sort((a, b) => {
     const aName = a.name || ''
     const bName = b.name || ''
     
-    // Extract numeric percentile from names
     const getPercentile = (name) => {
-      // Extract from names like "97th percentile", "50th percentile", "45.2th", or just "97th"
       if (name.includes('>')) return 100
       if (name.includes('<')) return 0
       const match = name.match(/(\d+\.?\d*)/)
@@ -133,23 +126,84 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
     const aPct = getPercentile(aName)
     const bPct = getPercentile(bName)
     
-    // Sort descending (highest percentile first)
     if (aPct !== bPct) {
       return bPct - aPct
     }
     return 0
   })
   
+  // For preemies, try to get xAxisValue from payload first (more reliable than label)
+  let actualLabel = label
+  const gaAtBirth = getGestationalAge(patientData)
+  if (gaAtBirth < 40 && payload && payload.length > 0) {
+    const payloadData = payload[0]?.payload
+    if (payloadData && typeof payloadData.xAxisValue === 'number') {
+      actualLabel = payloadData.xAxisValue
+    }
+  }
+  
+  const formatLabel = (labelValue) => {
+    if (labelFormatter) {
+      return labelFormatter(labelValue)
+    }
+    
+    const gaAtBirth = getGestationalAge(patientData)
+    if (gaAtBirth < 40) {
+      if (typeof labelValue === 'number') {
+        if (labelValue <= 50) {
+          return `${Math.round(labelValue)} weeks PMA`
+        } else {
+          const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+          const adjustedAgeYears = correctedAgeAt42Weeks + ((labelValue - 42) / 52.1775)
+          return `${formatAgeLabel(adjustedAgeYears)} (adjusted)`
+        }
+      }
+    }
+    
+    if (typeof labelValue === 'number') {
+      return formatAgeLabel(labelValue)
+    }
+    
+    return labelValue
+  }
+  
+  const getUnit = () => {
+    switch (chartType) {
+      case 'weight': return 'kg'
+      case 'height': return 'cm'
+      case 'hc': return 'cm'
+      case 'bmi': return 'kg/m²'
+      case 'ac': return 'cm'
+      case 'ssf': return 'mm'
+      case 'tsf': return 'mm'
+      default: return ''
+    }
+  }
+  
+  const unit = getUnit()
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  
   return (
     <div style={{
-      backgroundColor: 'rgba(255, 255, 255, 0.95)',
-      border: '1px solid #ccc',
-      borderRadius: '4px',
-      padding: '10px',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+      backgroundColor: 'rgba(255, 255, 255, 0.98)',
+      border: '2px solid #667eea',
+      borderRadius: '8px',
+      padding: isMobile ? '8px 12px' : '12px 16px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+      maxWidth: isMobile ? '90vw' : '280px',
+      fontSize: isMobile ? '16px' : '14px',
+      zIndex: 9999,
+      pointerEvents: 'auto'
     }}>
-      <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>
-        {labelFormatter ? labelFormatter(label) : label}
+      <p style={{ 
+        margin: '0 0 6px 0', 
+        fontWeight: 'bold',
+        fontSize: isMobile ? '14px' : '15px',
+        color: '#333',
+        borderBottom: '1px solid #e0e0e0',
+        paddingBottom: isMobile ? '4px' : '8px'
+      }}>
+        {formatLabel(actualLabel)}
       </p>
       <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
         {sortedPayload.map((entry, index) => {
@@ -159,10 +213,43 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
           const [value, name] = Array.isArray(result) ? result : [result, entry.name]
           // Patient lines are black (#000)
           const isPatient = entry.color === '#000'
+          
+          // Format value with unit
+          let displayValue = value
+          if (typeof value === 'number' && unit && !name.toLowerCase().includes(unit.toLowerCase())) {
+            if (chartType === 'weight' || chartType === 'bmi') {
+              displayValue = `${value.toFixed(2)} ${unit}`
+            } else {
+              displayValue = `${value.toFixed(1)} ${unit}`
+            }
+          }
+          
           return (
-            <li key={index} style={{ marginBottom: '4px', color: entry.color }}>
-              <span style={{ fontWeight: isPatient ? 'bold' : 'normal' }}>
-                {name}: {value}
+            <li 
+              key={index} 
+              style={{ 
+                marginBottom: isMobile ? '2px' : '6px', 
+                color: entry.color,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: isMobile ? '2px 0' : '4px 0'
+              }}
+            >
+              <span 
+                style={{ 
+                  display: 'inline-block',
+                  width: '12px',
+                  height: '12px',
+                  backgroundColor: entry.color,
+                  borderRadius: isPatient ? '50%' : '0',
+                  border: isPatient ? '2px solid #fff' : 'none',
+                  boxShadow: isPatient ? '0 0 0 1px #000' : 'none',
+                  flexShrink: 0
+                }}
+              />
+              <span style={{ fontWeight: isPatient ? 'bold' : 'normal', fontSize: '13px' }}>
+                <strong>{name}:</strong> {displayValue}
               </span>
             </li>
           )
@@ -173,8 +260,6 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
 })
 
 
-// Create a tick formatter that prevents duplicate consecutive labels
-// Each formatter instance maintains its own lastLabel state
 const createAgeTickFormatter = () => {
   let lastLabel = null
   let lastTickValue = null
@@ -208,14 +293,127 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const [tsfaData, setTsfaData] = useState(null) // triceps skinfold-for-age (WHO)
   const [bmifaData, setBmifaData] = useState(null)
   const [weightHeightData, setWeightHeightData] = useState(null)
+  // Preemie data
+  const [fentonData, setFentonData] = useState(null)
+  const [intergrowthWeightData, setIntergrowthWeightData] = useState(null)
+  const [intergrowthLengthData, setIntergrowthLengthData] = useState(null)
+  const [intergrowthHCData, setIntergrowthHCData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isRendering, setIsRendering] = useState(true)
 
   useEffect(() => {
-    // Always load reference data, defaulting to 'male' if no gender is selected,
-    // so charts can show full curves even before a person is added.
     loadReferenceData()
   }, [patientData?.gender, referenceSources?.age])
+
+  const loadPreemieData = async (gKey) => {
+    try {
+      const baseUrl = import.meta.env.BASE_URL
+      const gender = gKey === 'boys' ? 'boys' : 'girls'
+      
+      const fentonPath = `${baseUrl}data/fenton_lms.json`
+      const fentonResponse = await fetch(fentonPath)
+      if (fentonResponse.ok) {
+        const fentonJson = await fentonResponse.json()
+        const rawData = fentonJson.data[gender] || null
+        
+        if (rawData && rawData.weight) {
+          const convertedWeight = rawData.weight.map(w => ({
+            ...w,
+            p3: w.p3 ? w.p3 / 1000 : null,
+            p50: w.p50 ? w.p50 / 1000 : null,
+            p97: w.p97 ? w.p97 / 1000 : null,
+            M: w.M ? w.M / 1000 : null,
+          }))
+          
+          setFentonData({
+            ...rawData,
+            weight: convertedWeight
+          })
+        } else {
+          setFentonData(rawData)
+        }
+      }
+      
+      // Load INTERGROWTH-21st data
+      const intergrowthWeightPath = `${baseUrl}data/intergrowth_weight_${gender}.csv`
+      const intergrowthLengthPath = `${baseUrl}data/intergrowth_length_${gender}.csv`
+      const intergrowthHCPath = `${baseUrl}data/intergrowth_headCircumference_${gender}.csv`
+      
+      const [weightRes, lengthRes, hcRes] = await Promise.all([
+        fetch(intergrowthWeightPath).catch(() => null),
+        fetch(intergrowthLengthPath).catch(() => null),
+        fetch(intergrowthHCPath).catch(() => null)
+      ])
+      
+      if (weightRes && weightRes.ok) {
+        const weightText = await weightRes.text()
+        const weightRows = parseCsv(weightText)
+        const weightProcessed = weightRows
+          .map(r => {
+            const week = parseFloat(r.week)
+            if (typeof week !== 'number' || Number.isNaN(week)) return null
+            return {
+              week,
+              weightP3: r.p3 ? parseFloat(r.p3) : null,
+              weightP50: r.p50 ? parseFloat(r.p50) : null,
+              weightP97: r.p97 ? parseFloat(r.p97) : null,
+              weightL: r.L ? parseFloat(r.L) : null,
+              weightM: r.M ? parseFloat(r.M) : null,
+              weightS: r.S ? parseFloat(r.S) : null,
+            }
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.week - b.week)
+        setIntergrowthWeightData(weightProcessed)
+      }
+      
+      if (lengthRes && lengthRes.ok) {
+        const lengthText = await lengthRes.text()
+        const lengthRows = parseCsv(lengthText)
+        const lengthProcessed = lengthRows
+          .map(r => {
+            const week = parseFloat(r.week)
+            if (typeof week !== 'number' || Number.isNaN(week)) return null
+            return {
+              week,
+              heightP3: r.p3 ? parseFloat(r.p3) : null,
+              heightP50: r.p50 ? parseFloat(r.p50) : null,
+              heightP97: r.p97 ? parseFloat(r.p97) : null,
+              heightL: r.L ? parseFloat(r.L) : null,
+              heightM: r.M ? parseFloat(r.M) : null,
+              heightS: r.S ? parseFloat(r.S) : null,
+            }
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.week - b.week)
+        setIntergrowthLengthData(lengthProcessed)
+      }
+      
+      if (hcRes && hcRes.ok) {
+        const hcText = await hcRes.text()
+        const hcRows = parseCsv(hcText)
+        const hcProcessed = hcRows
+          .map(r => {
+            const week = parseFloat(r.week)
+            if (typeof week !== 'number' || Number.isNaN(week)) return null
+            return {
+              week,
+              hcP3: r.p3 ? parseFloat(r.p3) : null,
+              hcP50: r.p50 ? parseFloat(r.p50) : null,
+              hcP97: r.p97 ? parseFloat(r.p97) : null,
+              hcL: r.L ? parseFloat(r.L) : null,
+              hcM: r.M ? parseFloat(r.M) : null,
+              hcS: r.S ? parseFloat(r.S) : null,
+            }
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.week - b.week)
+        setIntergrowthHCData(hcProcessed)
+      }
+    } catch (error) {
+      console.error('Error loading preemie data:', error)
+    }
+  }
 
   const loadReferenceData = async () => {
     setLoading(true)
@@ -224,20 +422,20 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       const ageSource = referenceSources?.age || 'who'
       const baseUrl = import.meta.env.BASE_URL
 
-      const wfaPath = `${baseUrl}wfa_${gKey}_${ageSource}.csv`
-      const hcfaPath = `${baseUrl}hcfa_${gKey}_${ageSource}.csv`
+      const wfaPath = `${baseUrl}data/wfa_${gKey}_${ageSource}.csv`
+      const hcfaPath = `${baseUrl}data/hcfa_${gKey}_${ageSource}.csv`
 
       const heightPaths =
         ageSource === 'who'
-          ? [`${baseUrl}lhfa_${gKey}_who.csv`]
-          : [`${baseUrl}lhfa_${gKey}_cdc.csv`, `${baseUrl}hfa_${gKey}_cdc.csv`]
+          ? [`${baseUrl}data/lhfa_${gKey}_who.csv`]
+          : [`${baseUrl}data/lhfa_${gKey}_cdc.csv`, `${baseUrl}data/hfa_${gKey}_cdc.csv`]
 
-      const wflPath = `${baseUrl}wfl_${gKey}_${ageSource}.csv`
-      const wfhPath = `${baseUrl}wfh_${gKey}_${ageSource}.csv`
-      const bmifaPath = `${baseUrl}bmifa_${gKey}_who.csv` // BMI-for-age only available from WHO
-      const acfaPath = `${baseUrl}acfa_${gKey}_who.csv`   // arm circumference-for-age (WHO only)
-      const ssfaPath = `${baseUrl}ssfa_${gKey}_who.csv`   // subscapular skinfold-for-age (WHO only)
-      const tsfaPath = `${baseUrl}tsfa_${gKey}_who.csv`   // triceps skinfold-for-age (WHO only)
+      const wflPath = `${baseUrl}data/wfl_${gKey}_${ageSource}.csv`
+      const wfhPath = `${baseUrl}data/wfh_${gKey}_${ageSource}.csv`
+      const bmifaPath = `${baseUrl}data/bmifa_${gKey}_who.csv`
+      const acfaPath = `${baseUrl}data/acfa_${gKey}_who.csv`
+      const ssfaPath = `${baseUrl}data/ssfa_${gKey}_who.csv`
+      const tsfaPath = `${baseUrl}data/tsfa_${gKey}_who.csv`
 
       const fetchAll = await Promise.all([
         fetch(wfaPath),
@@ -475,6 +673,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       setTsfaData(tsfaProcessed)
       setBmifaData(bmifaProcessed)
       setWeightHeightData(whCombined)
+      
+      // Load preemie data (Fenton 2013 and INTERGROWTH-21st)
+      await loadPreemieData(gKey)
+      
       setLoading(false)
     } catch (error) {
       console.error('Error loading reference data:', error)
@@ -482,10 +684,106 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
   }
 
+  const shouldUsePreemieData = useCallback((measurementDate) => {
+    if (!patientData?.birthDate || !patientData?.gestationalAgeAtBirth) return false
+    const correctedAge = calculateCorrectedAge(
+      patientData.birthDate,
+      measurementDate,
+      patientData.gestationalAgeAtBirth
+    )
+    if (!correctedAge) return false
+    return correctedAge.correctedAgeYears < (2 / 52.1775) || correctedAge.gestationalAge < 42
+  }, [patientData])
+
+  const getPreemieData = useCallback((type, measurementDate) => {
+    if (!patientData?.birthDate || !patientData?.gestationalAgeAtBirth) return null
+    const correctedAge = calculateCorrectedAge(
+      patientData.birthDate,
+      measurementDate,
+      patientData.gestationalAgeAtBirth
+    )
+    if (!correctedAge || correctedAge.gestationalAge < 22 || correctedAge.gestationalAge > 50) return null
+    
+    const ga = Math.round(correctedAge.gestationalAge)
+    
+    if (type === 'weight') {
+      if (intergrowthWeightData && intergrowthWeightData.length > 0) {
+        const closest = intergrowthWeightData.reduce((closest, item) => {
+          if (!closest) return item
+          return Math.abs(item.week - ga) < Math.abs(closest.week - ga) ? item : closest
+        }, null)
+        if (closest) return { ...closest, xAxisValue: ga, isPreemie: true }
+      }
+      if (fentonData?.weight) {
+        const entry = fentonData.weight.find(w => w.week === ga)
+        if (entry) {
+          return {
+            week: entry.week,
+            weightP3: entry.p3,
+            weightP50: entry.p50,
+            weightP97: entry.p97,
+            weightL: entry.L,
+            weightM: entry.M,
+            weightS: entry.S,
+            xAxisValue: ga,
+            isPreemie: true
+          }
+        }
+      }
+    } else if (type === 'height') {
+      if (intergrowthLengthData && intergrowthLengthData.length > 0) {
+        const closest = intergrowthLengthData.reduce((closest, item) => {
+          if (!closest) return item
+          return Math.abs(item.week - ga) < Math.abs(closest.week - ga) ? item : closest
+        }, null)
+        if (closest) return { ...closest, xAxisValue: ga, isPreemie: true }
+      }
+      if (fentonData?.length) {
+        const entry = fentonData.length.find(w => w.week === ga)
+        if (entry) {
+          return {
+            week: entry.week,
+            heightP3: entry.p3,
+            heightP50: entry.p50,
+            heightP97: entry.p97,
+            heightL: entry.L,
+            heightM: entry.M,
+            heightS: entry.S,
+            xAxisValue: ga,
+            isPreemie: true
+          }
+        }
+      }
+    } else if (type === 'hc') {
+      if (intergrowthHCData && intergrowthHCData.length > 0) {
+        const closest = intergrowthHCData.reduce((closest, item) => {
+          if (!closest) return item
+          return Math.abs(item.week - ga) < Math.abs(closest.week - ga) ? item : closest
+        }, null)
+        if (closest) return { ...closest, xAxisValue: ga, isPreemie: true }
+      }
+      if (fentonData?.headCircumference) {
+        const entry = fentonData.headCircumference.find(w => w.week === ga)
+        if (entry) {
+          return {
+            week: entry.week,
+            hcP3: entry.p3,
+            hcP50: entry.p50,
+            hcP97: entry.p97,
+            hcL: entry.L,
+            hcM: entry.M,
+            hcS: entry.S,
+            xAxisValue: ga,
+            isPreemie: true
+          }
+        }
+      }
+    }
+    return null
+  }, [patientData, fentonData, intergrowthWeightData, intergrowthLengthData, intergrowthHCData])
+
   const prepareChartData = useCallback((data, measurements, valueKey, getValue) => {
-    // Always return reference data even if no measurements, so percentile lines show
     if (!data) return []
-    // If no measurements, just return reference data with null patient values
     if (!measurements || measurements.length === 0) {
       return data.map(ref => ({
         ageYears: ref.ageYears,
@@ -495,19 +793,13 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       }))
     }
     
-    // Start with reference data - ensure all properties are preserved
-    const chartData = data.map(ref => {
-      const point = {
-        ageYears: ref.ageYears,
-        ageLabel: formatAgeLabel(ref.ageYears),
-        ...ref,
-        [valueKey]: null
-      }
-      // Explicitly ensure all percentile keys exist (for debugging)
-      return point
-    })
+    const chartData = data.map(ref => ({
+      ageYears: ref.ageYears,
+      ageLabel: formatAgeLabel(ref.ageYears),
+      ...ref,
+      [valueKey]: null
+    }))
     
-    // Create patient measurement points
     const patientPoints = []
     measurements.forEach(measurement => {
       const patientAge = measurement.ageYears
@@ -515,7 +807,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       
       if (patientValue == null || patientAge == null) return
       
-      // Find closest reference point to get reference data
       const closestRef = chartData.reduce((closest, item) => {
         if (!closest) return item
         const closestDiff = Math.abs(closest.ageYears - patientAge)
@@ -524,24 +815,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       }, null)
       
       if (closestRef) {
-        // Create a new point with reference data but patient age and value
-        const newPoint = {
+        patientPoints.push({
           ...closestRef,
           ageYears: patientAge,
           ageLabel: formatAgeLabel(patientAge),
           [valueKey]: patientValue
-        }
-        patientPoints.push(newPoint)
+        })
       }
     })
     
-    // Merge patient points into chart data
-    // Always update the closest reference point instead of inserting new ones
-    // This prevents duplicate x-axis values
     patientPoints.forEach(patientPoint => {
       const patientAge = patientPoint.ageYears
-      
-      // Find the closest reference point
       let closestIndex = -1
       let closestDiff = Infinity
       
@@ -565,21 +849,229 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       }
     })
     
-    // Remove the temporary _patientAge property
     chartData.forEach(item => delete item._patientAge)
-    
-    // Sort by age to ensure proper line connection
     chartData.sort((a, b) => a.ageYears - b.ageYears)
-    
-    // Keep all data points for accurate line drawing
-    // X-axis will handle duplicate labels via custom tick formatter
     return chartData
   }, [])
+
+  // Prepare hybrid chart data that combines preemie (Fenton/INTERGROWTH) and term (WHO/CDC) data
+  const prepareHybridChartData = useCallback((type, standardData, preemieData, measurements, valueKey, getValue) => {
+    if (!patientData?.birthDate || !patientData?.gestationalAgeAtBirth) {
+      // No preemie info, use standard data
+      return prepareChartData(standardData, measurements, valueKey, getValue)
+    }
+    
+    // Ensure gestationalAgeAtBirth is a number
+    const gaAtBirth = getGestationalAge(patientData)
+    const isPreemie = gaAtBirth < 40
+    
+    if (!isPreemie && (!measurements || measurements.length === 0 || measurements.every(m => {
+      const ca = calculateCorrectedAge(patientData.birthDate, m.date, gaAtBirth)
+      return ca && ca.correctedAgeYears >= 0
+    }))) {
+      // Term infant, use standard data
+      return prepareChartData(standardData, measurements, valueKey, getValue)
+    }
+    
+    // We have a preemie - need to combine datasets
+    const chartData = []
+    
+    if (preemieData && preemieData.length > 0 && isPreemie) {
+      const startWeek = Math.max(22, Math.min(gaAtBirth, 42))
+      preemieData.forEach(ref => {
+        if (ref.week >= startWeek && ref.week <= 42) {
+          const point = {
+            xAxisValue: ref.week,
+            ageYears: ref.week / 52.1775,
+            isPreemie: true,
+            gestationalAge: ref.week,
+            ...ref,
+            [valueKey]: null
+          }
+          chartData.push(point)
+        }
+      })
+    }
+    
+    // Add term reference data (from 42 weeks PMA onwards for preemies, from birth for term babies)
+    // For preemies: transition to WHO at 42 weeks PMA (where official Fenton data ends), using corrected age through 24 months
+    // At 42 weeks PMA, corrected age = (42 - 40) / 52.1775 = ~0.038 years (~2 weeks)
+    // For term babies: use WHO from birth (age 0)
+    if (standardData && standardData.length > 0) {
+      if (isPreemie) {
+        // For preemies: calculate corrected age at 42 weeks PMA
+        const correctedAgeAt42Weeks = (42 - 40) / 52.1775 // ~0.038 years (~2 weeks)
+        
+        standardData.forEach(ref => {
+          if (ref.ageYears >= correctedAgeAt42Weeks && ref.ageYears <= 2) {
+            const xAxisValueWeeks = 42 + ((ref.ageYears - correctedAgeAt42Weeks) * 52.1775)
+            const point = {
+              xAxisValue: xAxisValueWeeks,
+              ageYears: ref.ageYears,
+              isPreemie: false,
+              correctedAge: ref.ageYears,
+              ...ref,
+              [valueKey]: null
+            }
+            chartData.push(point)
+          }
+        })
+      } else {
+        // For term babies: use WHO from birth (age 0)
+        standardData.forEach(ref => {
+          if (ref.ageYears >= 0) {
+            const point = {
+              xAxisValue: ref.ageYears,
+              ageYears: ref.ageYears,
+              isPreemie: false,
+              correctedAge: ref.ageYears,
+              ...ref,
+              [valueKey]: null
+            }
+            chartData.push(point)
+          }
+        })
+      }
+    }
+    
+    // Add patient measurement points
+    if (measurements && measurements.length > 0) {
+      measurements.forEach(measurement => {
+        const patientValue = getValue(measurement)
+        if (patientValue == null) return
+        
+        const correctedAge = calculateCorrectedAge(patientData.birthDate, measurement.date, gaAtBirth)
+        if (!correctedAge) return
+        
+        // For preemies: use preemie data if gestational age <= 42 weeks PMA
+        // Official Fenton data ends at 42 weeks, so transition to WHO with corrected age at that point
+        // At 42 weeks PMA and beyond, use WHO data with adjusted age (corrected age) until 2 years old
+        // CRITICAL: Include measurements before due date (negative corrected age) using preemie data
+        // These should NEVER go to the standard data path
+        const isBeforeDueDate = correctedAge.correctedAgeYears < 0
+        const usePreemie = isPreemie && (correctedAge.gestationalAge <= 42 || isBeforeDueDate)
+        
+        if (usePreemie) {
+          // Use gestational age and preemie reference
+          // For measurements before due date (negative corrected age), use the actual gestational age
+          // Don't clamp to 42 for measurements before due date - they should show at their actual GA
+          let ga = Math.round(correctedAge.gestationalAge)
+          // Only clamp if GA is > 42 (shouldn't happen for preemie measurements, but safety check)
+          // BUT: Never clamp measurements before due date - they must show at their actual GA
+          if (ga > 42 && !isBeforeDueDate) {
+            ga = 42
+          }
+          // Ensure GA is at least 22 (minimum for Fenton data)
+          ga = Math.max(22, ga)
+          
+          if (preemieData && preemieData.length > 0) {
+            const closestRef = preemieData.reduce((closest, item) => {
+              if (!closest) return item
+              return Math.abs(item.week - ga) < Math.abs(closest.week - ga) ? item : closest
+            }, null)
+            
+            if (closestRef) {
+              const point = {
+                ...closestRef,
+                xAxisValue: ga,
+                ageYears: ga / 52.1775,
+                isPreemie: true,
+                gestationalAge: ga,
+                [valueKey]: patientValue
+              }
+              chartData.push(point)
+            } else {
+              // If no reference found, still plot the point at the correct gestational age
+              // This can happen if preemie data doesn't cover that gestational age
+              // Create a minimal point structure - the chart will render it based on patientValue
+              const point = {
+                xAxisValue: ga,
+                ageYears: ga / 52.1775,
+                isPreemie: true,
+                gestationalAge: ga,
+                [valueKey]: patientValue
+              }
+              chartData.push(point)
+            }
+          } else {
+            // If preemie data is not available, still plot the point at the correct gestational age
+            // This ensures measurements before due date are always visible
+            // Create a minimal point structure - the chart will render it based on patientValue
+            const point = {
+              xAxisValue: ga,
+              ageYears: ga / 52.1775,
+              isPreemie: true,
+              gestationalAge: ga,
+              [valueKey]: patientValue
+            }
+            chartData.push(point)
+          }
+        } else if (standardData && correctedAge.correctedAgeYears >= 0 && !isBeforeDueDate) {
+          // CRITICAL: Never use standard data path for measurements before due date
+          // This check ensures measurements with negative corrected age are excluded
+          // For preemies: use adjusted age (corrected age) until 2 years old
+          // For term infants: use chronological age
+          const ageToUse = isPreemie ? correctedAge.correctedAgeYears : correctedAge.chronologicalAgeYears
+          
+          if (isPreemie && ageToUse > 2) {
+            return
+          }
+          
+          const closestRef = standardData.reduce((closest, item) => {
+            if (!closest) return item
+            return Math.abs(item.ageYears - ageToUse) < Math.abs(closest.ageYears - ageToUse) ? item : closest
+          }, null)
+          
+          if (closestRef) {
+            // For preemies: convert adjusted age to weeks for x-axis continuity
+            // At 42 weeks PMA, corrected age = (42-40)/52.1775 = ~0.038 years
+            // So xAxisValue = 42 + ((corrected age - 0.038) * 52.1775)
+            // For term infants: use chronological age in years directly
+            const correctedAgeAt42Weeks = (42 - 40) / 52.1775 // ~0.038 years
+            const xAxisValue = isPreemie 
+              ? 42 + ((ageToUse - correctedAgeAt42Weeks) * 52.1775)  // Preemie: convert from 42 weeks PMA
+              : ageToUse                   // Term: use chronological age in years
+            const point = {
+              ...closestRef,
+              xAxisValue: xAxisValue,
+              ageYears: ageToUse,
+              isPreemie: false,
+              correctedAge: ageToUse,
+              [valueKey]: patientValue
+            }
+            chartData.push(point)
+          }
+        }
+      })
+    }
+    
+    chartData.sort((a, b) => a.xAxisValue - b.xAxisValue)
+    
+    // Debug: Log patient points for preemie charts
+    if (isPreemie && chartData.length > 0) {
+      const patientPoints = chartData.filter(d => d[valueKey] != null)
+      if (patientPoints.length > 0) {
+        const pointDetails = patientPoints.map(p => ({ 
+          xAxisValue: p.xAxisValue, 
+          ga: p.gestationalAge, 
+          value: p[valueKey],
+          hasRef: !!p[`${valueKey.replace('patient', '')}P50`] || !!p.weightP50 || !!p.heightP50 || !!p.hcP50
+        }))
+        console.log(`[Preemie Chart Debug] ${patientPoints.length} patient points created for ${valueKey}:`, JSON.stringify(pointDetails, null, 2))
+        // Also log which ones are before due date
+        const beforeDueDate = pointDetails.filter(p => p.ga < 40)
+        if (beforeDueDate.length > 0) {
+          console.log(`[Preemie Chart Debug] ${beforeDueDate.length} points before due date (GA < 40w):`, JSON.stringify(beforeDueDate, null, 2))
+        }
+      }
+    }
+    
+    return chartData
+  }, [patientData, prepareChartData])
 
   const prepareWeightHeightData = useCallback(() => {
     if (!weightHeightData) return []
     
-    // Always start with reference data
     const chartData = weightHeightData.map(ref => ({
       ...ref,
       patientWeight: null
@@ -609,21 +1101,16 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       })
       
       if (closestIndex >= 0) {
-        // Always update the closest point instead of creating new ones
-        // This prevents duplicate x-axis values
         chartData[closestIndex].patientWeight = measurement.weight
       }
     })
     
-    // Sort by height
     chartData.sort((a, b) => a.height - b.height)
     
-    // Remove duplicate height points (within 0.5 cm) - keep the one with patient data if available
     const deduplicated = []
     chartData.forEach(item => {
       const existing = deduplicated.find(d => Math.abs(d.height - item.height) < 0.5)
       if (existing) {
-        // Merge: keep patient value if this item has one
         if (item.patientWeight != null && existing.patientWeight == null) {
           existing.patientWeight = item.patientWeight
         }
@@ -670,9 +1157,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
 
     if (!closestRef) return null
 
-    // Try LMS method first (more accurate), fall back to linear interpolation
     const getPercentileFromLMS = (val, L, M, S, p3, p15, p50, p85, p97) => {
-      // Use LMS if available and valid
       if (typeof L === 'number' && typeof M === 'number' && typeof S === 'number' &&
           !Number.isNaN(L) && !Number.isNaN(M) && !Number.isNaN(S) && M > 0 && S > 0) {
         const pct = calculatePercentileFromLMS(val, L, M, S)
@@ -746,7 +1231,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
 
     if (!closestRef || !closestRef.p3 || !closestRef.p15 || !closestRef.p50 || !closestRef.p85 || !closestRef.p97) return null
 
-    // Try LMS method first (more accurate), fall back to linear interpolation
     if (typeof closestRef.L === 'number' && typeof closestRef.M === 'number' && typeof closestRef.S === 'number' &&
         !Number.isNaN(closestRef.L) && !Number.isNaN(closestRef.M) && !Number.isNaN(closestRef.S) && 
         closestRef.M > 0 && closestRef.S > 0) {
@@ -842,7 +1326,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return [minDomain, maxDomain]
   }, [])
 
-  // Helper to interpolate CDC data to whole month boundaries for alignment with markers
   const interpolateCdcData = useCallback((data) => {
     if (!data || data.length < 2) return data
     
@@ -854,9 +1337,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       
       const currMonths = current.ageYears * 12
       const nextMonths = next.ageYears * 12
-      
-      // Find all whole month boundaries between them
-      // Use epsilon to avoid precision issues
       const startMonth = Math.floor(currMonths + 0.01) + 1
       const endMonth = Math.ceil(nextMonths - 0.01) - 1
       
@@ -881,30 +1361,85 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     }
     result.push(data[data.length - 1])
     
-    // Sort and de-duplicate by ageYears
     return result.sort((a, b) => a.ageYears - b.ageYears)
       .filter((v, i, a) => i === 0 || Math.abs(v.ageYears - a[i-1].ageYears) > 0.0001)
   }, [])
 
   const ageDomain = useMemo(() => calculateAgeDomain(patientData?.measurements), [calculateAgeDomain, patientData?.measurements])
   
+  const preemieDomain = useMemo(() => {
+    const gaAtBirth = getGestationalAge(patientData)
+    
+    if (!patientData?.gestationalAgeAtBirth || gaAtBirth >= 40) {
+      return null // Not a preemie
+    }
+    let minWeeks = gaAtBirth
+    let maxWeeks = 42 + (2 * 52.1775) // Default: 42 weeks + 2 years
+    
+    // Find the earliest and latest measurements to set domain bounds
+    if (patientData?.measurements && patientData.measurements.length > 0) {
+      // Find earliest measurement (may be before due date)
+      const earliestMeasurement = patientData.measurements.reduce((earliest, m) => {
+        return new Date(m.date) < new Date(earliest.date) ? m : earliest
+      })
+      
+      // Find latest measurement
+      const latestMeasurement = patientData.measurements.reduce((latest, m) => {
+        return new Date(m.date) > new Date(latest.date) ? m : latest
+      })
+      
+      // Calculate domain from earliest measurement
+      const earliestCorrectedAge = calculateCorrectedAge(patientData.birthDate, earliestMeasurement.date, gaAtBirth)
+      if (earliestCorrectedAge) {
+        // Ensure domain includes earliest measurement (may be at or before GA at birth)
+        // Use the minimum of GA at birth and the earliest measurement's GA
+        const earliestGA = Math.max(22, Math.round(earliestCorrectedAge.gestationalAge))
+        minWeeks = Math.min(gaAtBirth, earliestGA)
+        // But also ensure we don't go below 22 weeks (Fenton data limit)
+        minWeeks = Math.max(22, minWeeks)
+      }
+      
+      // Calculate domain from latest measurement
+      const latestCorrectedAge = calculateCorrectedAge(patientData.birthDate, latestMeasurement.date, gaAtBirth)
+      if (latestCorrectedAge) {
+        if (latestCorrectedAge.gestationalAge <= 42) {
+          maxWeeks = Math.max(42, latestCorrectedAge.gestationalAge + 2)
+        } else {
+          const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+          maxWeeks = 42 + ((latestCorrectedAge.correctedAgeYears - correctedAgeAt42Weeks) * 52.1775) + (2 * 52.1775 / 12)
+        }
+      }
+    }
+    
+    return [minWeeks, maxWeeks]
+  }, [patientData?.gestationalAgeAtBirth, patientData?.birthDate, patientData?.measurements])
+  
   const filterDataByAge = useCallback((data) => {
     if (!data) return []
+    // For preemie charts using xAxisValue (weeks), filter by xAxisValue instead of ageYears
+    if (patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && preemieDomain) {
+      // Filter by xAxisValue (weeks) for preemie charts
+      return data.filter(item => {
+        const xValue = item.xAxisValue != null ? item.xAxisValue : item.ageYears
+        return xValue != null && 
+               xValue >= preemieDomain[0] && 
+               xValue <= preemieDomain[1]
+      })
+    }
+    // For term charts, filter by ageYears
     return data.filter(item => 
       item.ageYears != null && 
       item.ageYears >= ageDomain[0] && 
       item.ageYears <= ageDomain[1]
     )
-  }, [ageDomain])
+  }, [ageDomain, preemieDomain, patientData?.gestationalAgeAtBirth])
 
   const calculateYDomain = useCallback((chartData, valueKeys, patientValue = null) => {
     if (!chartData || chartData.length === 0) return ['auto', 'auto']
     
-    // Try setting max to 0 - Recharts might detect it's too small and auto-adjust
     return ['auto', 'auto']
   }, [])
 
-  // Create tick formatters for each chart to prevent duplicate labels
   const wfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
   const hfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
   const hcfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
@@ -913,18 +1448,111 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const ssfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
   const tsfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
 
-  const wfaChartDataRaw = useMemo(() => 
-    prepareChartData(wfaData, patientData?.measurements, 'patientWeight', m => m.weight),
-    [prepareChartData, wfaData, patientData?.measurements]
-  )
-  const hfaChartDataRaw = useMemo(() => 
-    prepareChartData(hfaData, patientData?.measurements, 'patientHeight', m => m.height),
-    [prepareChartData, hfaData, patientData?.measurements]
-  )
-  const hcfaChartDataRaw = useMemo(() => 
-    prepareChartData(hcfaData, patientData?.measurements, 'patientHC', m => m.headCircumference),
-    [prepareChartData, hcfaData, patientData?.measurements]
-  )
+  const getPreemieWeightData = useMemo(() => {
+    if (!fentonData?.weight && !intergrowthWeightData) return null
+    // Prefer INTERGROWTH, fall back to Fenton
+    if (intergrowthWeightData && intergrowthWeightData.length > 0) {
+      return intergrowthWeightData.map(r => ({
+        week: r.week,
+        weightP3: r.weightP3,
+        weightP50: r.weightP50,
+        weightP97: r.weightP97,
+        weightL: r.weightL,
+        weightM: r.weightM,
+        weightS: r.weightS
+      }))
+    }
+    if (fentonData?.weight) {
+      return fentonData.weight.map(r => ({
+        week: r.week,
+        weightP3: r.p3,
+        weightP50: r.p50,
+        weightP97: r.p97,
+        weightL: r.L,
+        weightM: r.M,
+        weightS: r.S
+      }))
+    }
+    return null
+  }, [fentonData, intergrowthWeightData])
+
+  const getPreemieHeightData = useMemo(() => {
+    if (!fentonData?.length && !intergrowthLengthData) return null
+    if (intergrowthLengthData && intergrowthLengthData.length > 0) {
+      return intergrowthLengthData.map(r => ({
+        week: r.week,
+        heightP3: r.heightP3,
+        heightP50: r.heightP50,
+        heightP97: r.heightP97,
+        heightL: r.heightL,
+        heightM: r.heightM,
+        heightS: r.heightS
+      }))
+    }
+    if (fentonData?.length) {
+      return fentonData.length.map(r => ({
+        week: r.week,
+        heightP3: r.p3,
+        heightP50: r.p50,
+        heightP97: r.p97,
+        heightL: r.L,
+        heightM: r.M,
+        heightS: r.S
+      }))
+    }
+    return null
+  }, [fentonData, intergrowthLengthData])
+
+  const getPreemieHCData = useMemo(() => {
+    if (!fentonData?.headCircumference && !intergrowthHCData) return null
+    if (intergrowthHCData && intergrowthHCData.length > 0) {
+      return intergrowthHCData.map(r => ({
+        week: r.week,
+        hcP3: r.hcP3,
+        hcP50: r.hcP50,
+        hcP97: r.hcP97,
+        hcL: r.hcL,
+        hcM: r.hcM,
+        hcS: r.hcS
+      }))
+    }
+    if (fentonData?.headCircumference) {
+      return fentonData.headCircumference.map(r => ({
+        week: r.week,
+        hcP3: r.p3,
+        hcP50: r.p50,
+        hcP97: r.p97,
+        hcL: r.L,
+        hcM: r.M,
+        hcS: r.S
+      }))
+    }
+    return null
+  }, [fentonData, intergrowthHCData])
+
+  const wfaChartDataRaw = useMemo(() => {
+    const preemieData = getPreemieWeightData
+    if (preemieData && patientData?.gestationalAgeAtBirth) {
+      return prepareHybridChartData('weight', wfaData, preemieData, patientData?.measurements, 'patientWeight', m => m.weight)
+    }
+    return prepareChartData(wfaData, patientData?.measurements, 'patientWeight', m => m.weight)
+  }, [prepareChartData, prepareHybridChartData, wfaData, patientData?.measurements, patientData?.gestationalAgeAtBirth, getPreemieWeightData])
+  
+  const hfaChartDataRaw = useMemo(() => {
+    const preemieData = getPreemieHeightData
+    if (preemieData && patientData?.gestationalAgeAtBirth) {
+      return prepareHybridChartData('height', hfaData, preemieData, patientData?.measurements, 'patientHeight', m => m.height)
+    }
+    return prepareChartData(hfaData, patientData?.measurements, 'patientHeight', m => m.height)
+  }, [prepareChartData, prepareHybridChartData, hfaData, patientData?.measurements, patientData?.gestationalAgeAtBirth, getPreemieHeightData])
+  
+  const hcfaChartDataRaw = useMemo(() => {
+    const preemieData = getPreemieHCData
+    if (preemieData && patientData?.gestationalAgeAtBirth) {
+      return prepareHybridChartData('hc', hcfaData, preemieData, patientData?.measurements, 'patientHC', m => m.headCircumference)
+    }
+    return prepareChartData(hcfaData, patientData?.measurements, 'patientHC', m => m.headCircumference)
+  }, [prepareChartData, prepareHybridChartData, hcfaData, patientData?.measurements, patientData?.gestationalAgeAtBirth, getPreemieHCData])
   const bmifaChartDataRaw = useMemo(() => {
     const measurementsWithBMI = patientData?.measurements?.map(m => ({
       ...m,
@@ -976,21 +1604,18 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return match ? parseFloat(match[1]) : -1
   }, [])
 
-  // Optimized margins - enough space for percentile labels on the right
   const getChartMargins = useCallback(() => {
-    // Check if we're on mobile
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+    const topMargin = (patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40) ? 25 : 10
     return { 
-      top: 10, 
-      right: isMobile ? 40 : 70, 
-      left: isMobile ? 10 : 40, 
-      bottom: 40 
+      top: topMargin, 
+      right: isMobile ? 30 : 70, 
+      left: isMobile ? 0 : 40, 
+      bottom: isMobile ? 20 : 40
     }
-  }, [])
+  }, [patientData?.gestationalAgeAtBirth])
 
   const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, chartData, measurements, getValue) => {
-    // Get the last measurement for THIS SPECIFIC TYPE (not just the latest measurement overall)
-    // Filter measurements to only those that have a value for this type, then get the latest one by date
     const measurementsWithValue = measurements && measurements.length > 0
       ? measurements.filter(m => {
           const value = getValue(m)
@@ -998,7 +1623,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
         })
       : []
     
-    // Sort by date to ensure we get the latest one
     const sortedByDate = measurementsWithValue.sort((a, b) => {
       const dateA = new Date(a.date || 0)
       const dateB = new Date(b.date || 0)
@@ -1006,23 +1630,19 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     })
     
     const lastMeasurement = sortedByDate.length > 0
-      ? sortedByDate[sortedByDate.length - 1] // Latest date with this measurement type
+      ? sortedByDate[sortedByDate.length - 1]
       : null
     const lastValue = lastMeasurement ? getValue(lastMeasurement) : null
     const lastAge = lastMeasurement?.ageYears
     const patientPercentile = lastValue && lastAge ? getPatientPercentile(lastValue, lastAge, type) : null
     const patientNumeric = getNumericPercentile(patientPercentile)
     
-    // Get the last valid index for this data
     const dataLength = chartData?.length || 0
     const lastIndex = dataLength > 0 ? dataLength - 1 : -1
     
-    // Create label component factory that captures line properties
     const createEndLabel = (lineName, lineColor, isPatient = false) => {
       return ({ x, y, value, index, viewBox }) => {
-        // Only show label at the last data point and if value exists
         if (value == null || value === undefined || index !== lastIndex || !viewBox) return null
-        // Position label outside the chart area to the right
         const labelX = viewBox.x + viewBox.width + 5
         return (
           <text
@@ -1040,9 +1660,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       }
     }
     
-    // Custom label for patient point that shows at the actual point location (only for last point)
     const PatientPointLabel = ({ x, y, value, index, viewBox, payload }) => {
-      // Only show label on the last data point with a value
       const dataLength = chartData?.length || 0
       const lastIndexWithValue = chartData ? 
         chartData.map((d, i) => ({ value: d[patientDataKey], index: i }))
@@ -1051,8 +1669,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       
       if (value == null || value === undefined || index !== lastIndexWithValue || !patientPercentile) return null
       
-      // Try to get viewBox from different possible sources
-      let labelX = x + 10 // Default: just to the right of the point
+      let labelX = x + 10
       if (viewBox && viewBox.x !== undefined && viewBox.width !== undefined) {
         labelX = viewBox.x + viewBox.width + 5
       } else if (payload && payload.viewBox) {
@@ -1091,7 +1708,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       </Line>
     )
     
-    // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
         <Line key="p97" type="monotone" dataKey={`${dataKeyPrefix}P97`} stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false} connectNulls={true}>
@@ -1152,12 +1768,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   }, [getPatientPercentile, getNumericPercentile])
 
   const renderWeightForHeightLines = useCallback((chartData, measurements) => {
-    // Get the last measurement that has BOTH weight and height
     const measurementsWithBoth = measurements && measurements.length > 0
       ? measurements.filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
       : []
     
-    // Sort by date to ensure we get the latest one
     const sortedByDate = measurementsWithBoth.sort((a, b) => {
       const dateA = new Date(a.date || 0)
       const dateB = new Date(b.date || 0)
@@ -1176,14 +1790,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     const dataLength = chartData?.length || 0
     const lastIndex = dataLength > 0 ? dataLength - 1 : -1
     
-    // Create label component factory that captures line properties
     const createEndLabel = (lineName, lineColor, isPatient = false) => {
       return ({ x, y, value, index, viewBox, payload }) => {
-        // Only show label at the last data point and if value exists
         if (value == null || value === undefined || index !== lastIndex) return null
         
-        // Try to get viewBox from different possible sources
-        let labelX = x + 5 // Default: just to the right of the point
+        let labelX = x + 5
         if (viewBox && viewBox.x !== undefined && viewBox.width !== undefined) {
           labelX = viewBox.x + viewBox.width + 5
         } else if (payload && payload.viewBox) {
@@ -1257,7 +1868,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       </Line>
     )
     
-    // Helper to render all percentile lines in order
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
         <Line key="p97" type="monotone" dataKey="p97" stroke="#ff6b6b" strokeWidth={1} dot={false} activeDot={false} name="97th" isAnimationActive={false} connectNulls={true}>
@@ -1334,7 +1944,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   if (loading) return <div className="loading">Loading reference data...</div>
   if (!wfaData && !hfaData && !hcfaData) return <div className="no-data">No reference data available</div>
 
-  // Determine age label based on max age in measurements
   const maxAge = (patientData?.measurements || []).reduce((max, m) => Math.max(max, m.ageYears || 0), 0)
   const ageLabel = maxAge < 2 ? 'Age (Months)' : 'Age (Years)'
 
@@ -1373,13 +1982,18 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       {wfaChartData && wfaChartData.length > 0 && (
         <div className="chart-container">
           <h3>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
+            <p className="chart-note" style={{fontSize: '0.85rem', color: '#667eea', marginTop: '5px', marginBottom: '10px', fontStyle: 'italic'}}>
+              ⓘ For preemies: Using adjusted age (corrected age) until 2 years old
+            </p>
+          )}
           {isRendering ? (
             <div className="chart-spinner-container">
               <div className="spinner"></div>
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
-          <ResponsiveContainer width="100%" height={400}>
+          <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart 
               data={wfaChartData || []} 
               margin={getChartMargins()}
@@ -1387,25 +2001,74 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
-                dataKey="ageYears"
+                dataKey={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? "xAxisValue" : "ageYears"}
                 type="number"
                 scale="linear"
-                domain={ageDomain}
-                tickFormatter={wfaTickFormatter}
-                label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
+                domain={preemieDomain || ageDomain}
+                allowDataOverflow={false}
+                tickFormatter={(value) => {
+                  // If we have preemie data, format as weeks for values <= 42 weeks, otherwise as adjusted age
+                  const gaAtBirth = getGestationalAge(patientData)
+    if (gaAtBirth < 40) {
+                    if (value <= 42) {
+                      return `${Math.round(value)}w`
+                    } else {
+                      // Convert weeks back to adjusted age in years for display
+                      // At 42 weeks PMA, corrected age = (42-40)/52.1775 = ~0.038 years
+                      const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+                      const adjustedAgeYears = correctedAgeAt42Weeks + ((value - 42) / 52.1775)
+                      return formatAgeLabel(adjustedAgeYears)
+                    }
+                  }
+                  return wfaTickFormatter(value)
+                }}
+                ticks={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 
+                  // For preemie charts: show ticks starting from GA at birth, every 2 weeks up to 42, then every 0.1 years up to 2 years
+                  (() => {
+                    const ticks = []
+                    const startWeek = patientData.gestationalAgeAtBirth
+                    // Start from GA at birth, then every 2 weeks up to 42
+                    // Round startWeek up to nearest even number for cleaner ticks
+                    const firstTick = Math.ceil(startWeek / 2) * 2
+                    for (let w = firstTick; w <= 42; w += 2) {
+                      if (w >= startWeek) {
+                        ticks.push(w)
+                      }
+                    }
+                    // After 42 weeks: add ticks at corrected age intervals (starting from ~0.038 years at 42 weeks)
+                    const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+                    for (let y = 0.1; y <= 2.0; y += 0.1) {
+                      ticks.push(42 + ((y - correctedAgeAt42Weeks) * 52.1775))
+                    }
+                    return ticks
+                  })() : undefined
+                }
+                label={{ value: patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
-                padding={{ left: 0, right: 0 }}
               />
               <YAxis 
                 domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], null)}
-                label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }} 
+                label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft', offset: 10 }} 
+              />
+              <Tooltip 
+                content={<OrderedTooltip chartType="weight" patientData={patientData} />}
+                cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                trigger={['hover', 'click']}
+                shared={true}
+                position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData?.measurements, m => m.weight)}
             </LineChart>
           </ResponsiveContainer>
           </div>
+          )}
+          {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
+            <p className="chart-note" style={{fontSize: '0.8rem', color: '#666', marginTop: '10px'}}>
+              Prior to 42 weeks post-menstrual age, using <a href="https://ucalgary.ca/resource/preterm-growth-chart/preterm-growth-chart" target="_blank" rel="noopener noreferrer" style={{color: '#667eea'}}>Fenton 2025</a> growth charts (University of Calgary, CC BY-NC-ND 4.0). From 42 weeks onwards, using {getSourceLabel(referenceSources?.age)} growth standards.
+            </p>
           )}
         </div>
       )}
@@ -1414,35 +2077,82 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       {hfaChartData && hfaChartData.length > 0 && (
         <div className="chart-container">
           <h3>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
+            <p className="chart-note" style={{fontSize: '0.85rem', color: '#667eea', marginTop: '5px', marginBottom: '10px', fontStyle: 'italic'}}>
+              ⓘ For preemies: Using adjusted age (corrected age) until 2 years old
+            </p>
+          )}
           {isRendering ? (
             <div className="chart-spinner-container">
               <div className="spinner"></div>
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
-          <ResponsiveContainer width="100%" height={400}>
+          <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={hfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
-                dataKey="ageYears"
+                dataKey={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? "xAxisValue" : "ageYears"}
                 type="number"
                 scale="linear"
-                domain={ageDomain}
-                tickFormatter={hfaTickFormatter}
-                label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
+                domain={preemieDomain || ageDomain}
+                allowDataOverflow={false}
+                tickFormatter={(value) => {
+                  const gaAtBirth = getGestationalAge(patientData)
+    if (gaAtBirth < 40) {
+                    if (value <= 42) {
+                      return `${Math.round(value)}w`
+                    } else {
+                      const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+                      const adjustedAgeYears = correctedAgeAt42Weeks + ((value - 42) / 52.1775)
+                      return formatAgeLabel(adjustedAgeYears)
+                    }
+                  }
+                  return hfaTickFormatter(value)
+                }}
+                ticks={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 
+                  (() => {
+                    const ticks = []
+                    const startWeek = patientData.gestationalAgeAtBirth
+                    const firstTick = Math.ceil(startWeek / 2) * 2
+                    for (let w = firstTick; w <= 42; w += 2) {
+                      if (w >= startWeek) {
+                        ticks.push(w)
+                      }
+                    }
+                    const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+                    for (let y = 0.1; y <= 2.0; y += 0.1) {
+                      ticks.push(42 + ((y - correctedAgeAt42Weeks) * 52.1775))
+                    }
+                    return ticks
+                  })() : undefined
+                }
+                label={{ value: patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
-                padding={{ left: 0, right: 0 }}
               />
               <YAxis 
                 domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], null)}
                 label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} 
+              />
+              <Tooltip 
+                content={<OrderedTooltip chartType="height" patientData={patientData} />}
+                cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                trigger={['hover', 'click']}
+                shared={true}
+                position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData?.measurements, m => m.height)}
             </LineChart>
           </ResponsiveContainer>
           </div>
+          )}
+          {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
+            <p className="chart-note" style={{fontSize: '0.8rem', color: '#666', marginTop: '10px'}}>
+              Prior to 42 weeks post-menstrual age, using <a href="https://ucalgary.ca/resource/preterm-growth-chart/preterm-growth-chart" target="_blank" rel="noopener noreferrer" style={{color: '#667eea'}}>Fenton 2025</a> growth charts (University of Calgary, CC BY-NC-ND 4.0). From 42 weeks onwards, using {getSourceLabel(referenceSources?.age)} growth standards.
+            </p>
           )}
         </div>
       )}
@@ -1451,35 +2161,82 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       {hcfaChartData && hcfaChartData.length > 0 && (hcfaData?.[0]?.hcP50 != null) && (
         <div className="chart-container">
           <h3>Head Circumference-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
+            <p className="chart-note" style={{fontSize: '0.85rem', color: '#667eea', marginTop: '5px', marginBottom: '10px', fontStyle: 'italic'}}>
+              ⓘ For preemies: Using adjusted age (corrected age) until 2 years old
+            </p>
+          )}
           {isRendering ? (
             <div className="chart-spinner-container">
               <div className="spinner"></div>
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
-          <ResponsiveContainer width="100%" height={400}>
+          <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={hcfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
-                dataKey="ageYears"
+                dataKey={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? "xAxisValue" : "ageYears"}
                 type="number"
                 scale="linear"
-                domain={ageDomain}
-                tickFormatter={hcfaTickFormatter}
-                label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
+                domain={preemieDomain || ageDomain}
+                allowDataOverflow={false}
+                tickFormatter={(value) => {
+                  const gaAtBirth = getGestationalAge(patientData)
+    if (gaAtBirth < 40) {
+                    if (value <= 42) {
+                      return `${Math.round(value)}w`
+                    } else {
+                      const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+                      const adjustedAgeYears = correctedAgeAt42Weeks + ((value - 42) / 52.1775)
+                      return formatAgeLabel(adjustedAgeYears)
+                    }
+                  }
+                  return hcfaTickFormatter(value)
+                }}
+                ticks={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 
+                  (() => {
+                    const ticks = []
+                    const startWeek = patientData.gestationalAgeAtBirth
+                    const firstTick = Math.ceil(startWeek / 2) * 2
+                    for (let w = firstTick; w <= 42; w += 2) {
+                      if (w >= startWeek) {
+                        ticks.push(w)
+                      }
+                    }
+                    const correctedAgeAt42Weeks = (42 - 40) / 52.1775
+                    for (let y = 0.1; y <= 2.0; y += 0.1) {
+                      ticks.push(42 + ((y - correctedAgeAt42Weeks) * 52.1775))
+                    }
+                    return ticks
+                  })() : undefined
+                }
+                label={{ value: patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
-                padding={{ left: 0, right: 0 }}
               />
               <YAxis 
                 domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], null)}
                 label={createYAxisLabel('Head Circumference (cm)')}
+              />
+              <Tooltip 
+                content={<OrderedTooltip chartType="hc" patientData={patientData} />}
+                cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                trigger={['hover', 'click']}
+                shared={true}
+                position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData?.measurements, m => m.headCircumference)}
             </LineChart>
           </ResponsiveContainer>
           </div>
+          )}
+          {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
+            <p className="chart-note" style={{fontSize: '0.8rem', color: '#666', marginTop: '10px'}}>
+              Prior to 42 weeks post-menstrual age, using <a href="https://ucalgary.ca/resource/preterm-growth-chart/preterm-growth-chart" target="_blank" rel="noopener noreferrer" style={{color: '#667eea'}}>Fenton 2025</a> growth charts (University of Calgary, CC BY-NC-ND 4.0). From 42 weeks onwards, using {getSourceLabel(referenceSources?.age)} growth standards.
+            </p>
           )}
         </div>
       )}
@@ -1494,7 +2251,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
-          <ResponsiveContainer width="100%" height={400}>
+          <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={bmifaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
               <XAxis 
@@ -1511,6 +2268,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               <YAxis 
                 domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], null)}
                 label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} 
+              />
+              <Tooltip 
+                content={<OrderedTooltip chartType="bmi" patientData={patientData} />}
+                cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                trigger={['hover', 'click']}
+                shared={true}
+                position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData?.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi)}
@@ -1539,7 +2304,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 </div>
               ) : (
               <div className="chart-scroll-wrapper">
-              <ResponsiveContainer width="100%" height={400}>
+              <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={acfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
@@ -1553,6 +2318,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   <YAxis 
                     domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], null)}
                     label={createYAxisLabel('Arm Circumference (cm)')}
+                  />
+                  <Tooltip 
+                    content={<OrderedTooltip chartType="ac" patientData={patientData} />}
+                    cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                    allowEscapeViewBox={{ x: true, y: true }}
+                    trigger={['hover', 'click']}
+                    shared={true}
+                    position={{ x: 'auto', y: 'auto' }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData?.measurements, m => m.armCircumference)}
@@ -1573,7 +2346,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 </div>
               ) : (
               <div className="chart-scroll-wrapper">
-              <ResponsiveContainer width="100%" height={400}>
+              <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={ssfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
@@ -1587,6 +2360,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   <YAxis 
                     domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], null)}
                     label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
+                  />
+                  <Tooltip 
+                    content={<OrderedTooltip chartType="ssf" patientData={patientData} />}
+                    cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                    allowEscapeViewBox={{ x: true, y: true }}
+                    trigger={['hover', 'click']}
+                    shared={true}
+                    position={{ x: 'auto', y: 'auto' }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData?.measurements, m => m.subscapularSkinfold)}
@@ -1607,7 +2388,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 </div>
               ) : (
               <div className="chart-scroll-wrapper">
-              <ResponsiveContainer width="100%" height={400}>
+              <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={tsfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis
@@ -1621,6 +2402,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   <YAxis 
                     domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], null)}
                     label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
+                  />
+                  <Tooltip 
+                    content={<OrderedTooltip chartType="tsf" patientData={patientData} />}
+                    cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                    allowEscapeViewBox={{ x: true, y: true }}
+                    trigger={['hover', 'click']}
+                    shared={true}
+                    position={{ x: 'auto', y: 'auto' }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData?.measurements, m => m.tricepsSkinfold)}
@@ -1646,7 +2435,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               </div>
             ) : (
             <div className="chart-scroll-wrapper">
-            <ResponsiveContainer width="100%" height={400}>
+            <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
               <LineChart data={whChartData} margin={getChartMargins()} isAnimationActive={false}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis 
@@ -1656,11 +2445,19 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   domain={heightDomain}
                   label={{ value: 'Height (cm)', position: 'insideBottom', offset: -10 }}
                   allowDataOverflow={false}
-                  padding={{ left: 0, right: 0 }}
                 />
                 <YAxis
                   domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], null)}
                   label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }}
+                />
+                <Tooltip 
+                  content={<OrderedTooltip chartType="weight" patientData={patientData} />}
+                  cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
+                  allowEscapeViewBox={{ x: true, y: true }}
+                  trigger={['hover', 'click']}
+                  shared={true}
+                  position={{ x: 'auto', y: 'auto' }}
+                  labelFormatter={(value) => `Height: ${value.toFixed(1)} cm`}
                 />
                 {/* Legend removed - labels now appear at end of lines */}
                 {renderWeightForHeightLines(whChartData, patientData?.measurements)}

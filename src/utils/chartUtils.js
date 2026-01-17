@@ -74,3 +74,6 @@ export const calculateBMI = (weight, height) => {
   return weight / (heightM * heightM)
 }
 
+
+
+

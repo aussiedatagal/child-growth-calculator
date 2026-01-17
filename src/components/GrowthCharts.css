@@ -16,6 +16,12 @@
   margin-bottom: 3rem;
 }
 
+@media (max-width: 767px) {
+  .chart-section {
+    padding: 0 0.5rem; /* Reduce padding on mobile */
+  }
+}
+
 .section-header {
   color: #333;
   margin-bottom: 1rem;
@@ -42,9 +48,28 @@
 
 @media (max-width: 767px) {
   .chart-container {
-    padding: 0.5rem 0.25rem;
+    padding: 0.5rem 0;
     background: #fff; /* Slightly cleaner for mobile */
     border-radius: 4px;
+  }
+  
+  /* Reduce Y-axis width on mobile to minimize left spacing */
+  .chart-container .recharts-cartesian-axis-y {
+    width: 35px !important;
+  }
+  
+  .chart-container .recharts-cartesian-axis-y .recharts-label {
+    font-size: 9px;
+  }
+  
+  .chart-container .recharts-cartesian-axis-y .recharts-cartesian-axis-tick {
+    font-size: 9px;
+  }
+  
+  /* Ensure the chart content starts from the left edge */
+  .chart-container .recharts-wrapper {
+    margin-left: 0 !important;
+    padding-left: 0 !important;
   }
 }
 
@@ -58,48 +83,24 @@
 
 .chart-scroll-wrapper {
   width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible !important;
   padding-bottom: 10px;
-  /* Smooth scrolling */
-  scroll-behavior: smooth;
-  /* Custom scrollbar styling */
-  scrollbar-width: thin;
-  scrollbar-color: #667eea #f0f0f0;
-  /* Ensure it fits mobile screens */
   max-width: 100%;
   box-sizing: border-box;
 }
 
 @media (max-width: 767px) {
   .chart-scroll-wrapper {
-    /* Allow charts to be wider than the viewport on mobile for readability */
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    margin: 0;
+    padding: 0;
   }
   
   .chart-container .recharts-responsive-container {
-    min-width: 500px; /* Force a minimum width so it's not too squished */
+    min-width: 100%; /* Use full width on mobile */
+    width: 100% !important;
   }
 }
 
-.chart-scroll-wrapper::-webkit-scrollbar {
-  height: 8px;
-}
-
-.chart-scroll-wrapper::-webkit-scrollbar-track {
-  background: #f0f0f0;
-  border-radius: 4px;
-}
-
-.chart-scroll-wrapper::-webkit-scrollbar-thumb {
-  background: #667eea;
-  border-radius: 4px;
-}
-
-.chart-scroll-wrapper::-webkit-scrollbar-thumb:hover {
-  background: #5568d3;
-}
 
 .chart-container h3 {
   color: #555;
@@ -222,4 +223,29 @@
   padding-right: 0 !important;
   margin-right: 0 !important;
 }
+
+/* Mobile-friendly tooltip styles */
+.recharts-tooltip-wrapper {
+  pointer-events: auto !important;
+}
+
+@media (max-width: 767px) {
+  .recharts-tooltip-wrapper {
+    z-index: 9999 !important;
+    pointer-events: auto !important;
+  }
+  
+  .recharts-tooltip-wrapper .recharts-tooltip-content {
+    font-size: 16px !important;
+    padding: 14px 18px !important;
+    max-width: 90vw !important;
+  }
+}
+.chart-container,
+.chart-scroll-wrapper,
+.recharts-wrapper,
+.recharts-responsive-container {
+  overflow: visible !important;
+}
+
 

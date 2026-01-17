@@ -40,3 +40,33 @@ Thumbs.db
 dist/
 build/
 
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+playwright/.auth/
+
+# Test artifacts (but allow test data files)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webm
+*.mp4
+!public/**/*.png
+!public/**/*.jpg
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Coverage
+coverage/
+*.lcov
+
+# Temporary files
+TODO:
+*.tmp
+*.temp
+
