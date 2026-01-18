@@ -26,6 +26,20 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
     // Reset fetch mock
     global.fetch = vi.fn((url) => {
       const urlString = typeof url === 'string' ? url : url.toString()
+      if (urlString.includes('.json') && urlString.includes('/data/')) {
+        const mockJsonData = [
+          { Month: 0, L: 1, M: 3.346, S: 0.14602, P3: 2.1, P15: 2.5, P25: 2.9, P50: 3.3, P75: 3.9, P85: 4.3, P90: 4.6, P97: 5.0 },
+          { Month: 1, L: 1, M: 4.4709, S: 0.13395, P3: 3.4, P15: 3.8, P25: 4.1, P50: 4.5, P75: 5.0, P85: 5.4, P90: 5.7, P97: 6.2 },
+          { Month: 12, L: 1, M: 9.5866, S: 0.09358, P3: 7.8, P15: 8.5, P25: 9.0, P50: 9.6, P75: 10.2, P85: 10.6, P90: 11.0, P97: 11.5 },
+          { Month: 24, L: 1, M: 12.3396, S: 0.08012, P3: 10.2, P15: 11.0, P25: 11.5, P50: 12.3, P75: 13.0, P85: 13.5, P90: 13.9, P97: 14.5 }
+        ]
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockJsonData),
+          status: 200,
+          headers: new Headers({ 'Content-Type': 'application/json' })
+        })
+      }
       if (urlString.includes('.csv')) {
         const mockCsvData = `Month,L,M,S,P3,P15,P25,P50,P75,P85,P90,P97
 0,1,3.346,0.14602,2.1,2.5,2.9,3.3,3.9,4.3,4.6,5.0
@@ -1930,6 +1944,227 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
       // Domain should use 10cm intervals for heights >= 100
       // Min: floor(105.3/10)*10 - 10 = 100 - 10 = 90
       // Max: ceil(147.8/10)*10 + 10 = 150 + 10 = 160
+    })
+  })
+
+  describe('Toast Notifications', () => {
+    it('should show toast when patient information is saved', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+
+      // Wait for app to be ready
+      await waitFor(() => {
+        expect(screen.queryByLabelText(/select person/i)).toBeInTheDocument()
+      }, { timeout: 10000 })
+
+      const select = screen.getByLabelText(/select person/i)
+      await user.selectOptions(select, '__add__')
+
+      await waitFor(() => {
+        const nameInput = screen.queryByLabelText(/name \*/i)
+        expect(nameInput).toBeInTheDocument()
+      }, { timeout: 10000 })
+
+      const nameInput = screen.getByLabelText(/name \*/i)
+      const dobInput = screen.getByLabelText(/birth date \*/i)
+      const genderSelect = screen.getByLabelText(/gender \*/i)
+
+      await user.type(nameInput, 'Test Person')
+      await user.type(dobInput, '2020-01-01')
+      await user.selectOptions(genderSelect, 'male')
+
+      const submitButton = screen.getByRole('button', { name: /add person/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(screen.getByText('Patient information saved')).toBeInTheDocument()
+      }, { timeout: 10000 })
+    })
+
+    it('should show toast when measurement is added', async () => {
+      const user = userEvent.setup()
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male'
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      render(<App />)
+
+      await waitFor(() => {
+        const addButton = screen.queryByRole('button', { name: /add measurement/i })
+        expect(addButton).toBeInTheDocument()
+      }, { timeout: 5000 })
+
+      const addButton = screen.getByRole('button', { name: /add measurement/i })
+      await user.click(addButton)
+
+      await waitFor(() => {
+        const weightInput = screen.queryByLabelText(/weight \(kg\)/i)
+        expect(weightInput).toBeInTheDocument()
+      }, { timeout: 5000 })
+
+      const weightInput = screen.getByLabelText(/weight \(kg\)/i)
+      await user.type(weightInput, '10.5')
+
+      const submitButton = screen.getByRole('button', { name: /add measurement/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(screen.getByText('Measurement saved')).toBeInTheDocument()
+      }, { timeout: 5000 })
+    })
+
+    it('should show toast when data is exported', async () => {
+      const user = userEvent.setup()
+      const person = createMockPerson()
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      render(<App />)
+
+      await waitFor(() => {
+        const exportButton = screen.queryByRole('button', { name: /download data/i })
+        expect(exportButton).toBeInTheDocument()
+      }, { timeout: 5000 })
+
+      const exportButton = screen.getByRole('button', { name: /download data/i })
+      await user.click(exportButton)
+
+      await waitFor(() => {
+        expect(screen.getByText('Data exported successfully')).toBeInTheDocument()
+      }, { timeout: 5000 })
+    })
+  })
+
+  describe('Privacy Policy', () => {
+    it('should show privacy policy when link is clicked', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+
+      // Wait for app to be ready - wait for footer to appear
+      await waitFor(() => {
+        expect(screen.queryByText(/privacy policy/i)).toBeInTheDocument()
+      }, { timeout: 10000 })
+
+      // Find the button by role or text
+      const privacyButton = screen.getByRole('button', { name: /privacy policy/i }) || 
+                           screen.getByText(/privacy policy/i)
+      expect(privacyButton).toBeInTheDocument()
+      
+      await user.click(privacyButton)
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Privacy Policy' })).toBeInTheDocument()
+        expect(screen.getByText(/Data Storage/i)).toBeInTheDocument()
+      }, { timeout: 10000 })
+    })
+
+    it('should close privacy policy when close button is clicked', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+
+      // Wait for app to be ready - wait for footer to appear
+      await waitFor(() => {
+        expect(screen.queryByText(/privacy policy/i)).toBeInTheDocument()
+      }, { timeout: 10000 })
+
+      // Find the button by role or text
+      const privacyButton = screen.getByRole('button', { name: /privacy policy/i }) || 
+                           screen.getByText(/privacy policy/i)
+      expect(privacyButton).toBeInTheDocument()
+      
+      await user.click(privacyButton)
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Privacy Policy' })).toBeInTheDocument()
+      }, { timeout: 10000 })
+
+      const closeButton = screen.getByRole('button', { name: /×/ }) || 
+                         screen.getAllByText('×').find(btn => btn.closest('.privacy-policy-close'))
+      await user.click(closeButton)
+
+      await waitFor(() => {
+        expect(screen.queryByRole('heading', { name: 'Privacy Policy' })).not.toBeInTheDocument()
+      }, { timeout: 10000 })
+    })
+  })
+
+  describe('GitHub Link', () => {
+    it('should have GitHub link in footer', () => {
+      render(<App />)
+      
+      const githubLink = screen.getByText(/view on github/i).closest('a')
+      expect(githubLink).toHaveAttribute('href', 'https://github.com/aussiedatagal/child-growth-calculator')
+      expect(githubLink).toHaveAttribute('target', '_blank')
+      expect(githubLink).toHaveAttribute('rel', 'noopener noreferrer')
+    })
+  })
+
+  describe('Weight Input Precision', () => {
+    it('should allow gram-level precision for weight input', async () => {
+      const user = userEvent.setup()
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male'
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      render(<App />)
+
+      await waitFor(() => {
+        const addButton = screen.queryByRole('button', { name: /add measurement/i })
+        expect(addButton).toBeInTheDocument()
+      }, { timeout: 5000 })
+
+      const addButton = screen.getByRole('button', { name: /add measurement/i })
+      await user.click(addButton)
+
+      await waitFor(() => {
+        const weightInput = screen.queryByLabelText(/weight \(kg\)/i)
+        expect(weightInput).toBeInTheDocument()
+      }, { timeout: 5000 })
+
+      const weightInput = screen.getByLabelText(/weight \(kg\)/i)
+      expect(weightInput).toHaveAttribute('step', '0.001')
+    })
+  })
+
+  describe('JSON Data Loading', () => {
+    it('should load JSON files instead of CSV for reference data', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch')
+      const person = createMockPerson({
+        birthDate: '2020-01-01',
+        gender: 'male'
+      })
+      setLocalStorageData({
+        people: createMockPeople([person]),
+        selectedPersonId: person.id
+      })
+
+      render(<App />)
+
+      await waitFor(() => {
+        const jsonFetches = fetchSpy.mock.calls.filter(call => {
+          const url = typeof call[0] === 'string' ? call[0] : call[0].toString()
+          return url.includes('.json') && url.includes('/data/')
+        })
+        expect(jsonFetches.length).toBeGreaterThan(0)
+      }, { timeout: 10000 })
+
+      const csvFetches = fetchSpy.mock.calls.filter(call => {
+        const url = typeof call[0] === 'string' ? call[0] : call[0].toString()
+        return url.includes('.csv') && url.includes('/data/') && !url.includes('intergrowth')
+      })
+      expect(csvFetches.length).toBe(0)
     })
   })
 })
