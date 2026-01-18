@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import './BoxWhiskerPlots.css'
 import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, calculateBMI } from '../utils/chartUtils'
 import { loadReferenceData as loadCachedReferenceData } from '../utils/referenceDataCache'
+import { formatWeight, formatLength } from '../utils/unitConversion'
 
-function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange }) {
+function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false }) {
   const [wfaData, setWfaData] = useState(null)
   const [hfaData, setHfaData] = useState(null)
   const [hcfaData, setHcfaData] = useState(null)
@@ -13,6 +14,17 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   const [bmifaData, setBmifaData] = useState(null)
   const [weightHeightData, setWeightHeightData] = useState(null)
   const [loading, setLoading] = useState(true)
+  
+  const [selectedMeasurements, setSelectedMeasurements] = useState({
+    weight: null,
+    height: null,
+    headCircumference: null,
+    armCircumference: null,
+    subscapularSkinfold: null,
+    tricepsSkinfold: null,
+    weightHeight: null,
+    bmi: null
+  })
   
   useEffect(() => {
     if (patientData?.gender && patientData?.measurements && patientData?.measurements.length > 0) {
@@ -219,8 +231,6 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     return closest
   }
 
-  const whReference = getWeightHeightReference()
-
   if (loading) {
     return <div className="loading">Loading reference data...</div>
   }
@@ -230,6 +240,17 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
   }
 
   const getSourceLabel = (source) => (source === 'cdc' ? 'CDC' : 'WHO')
+
+  const getClosestRefByAge = (data, measurement) => {
+    if (!data || !measurement) return null
+    const patientAge = measurement.ageYears
+    return data.reduce((closest, item) => {
+      if (!closest) return item
+      const closestDiff = Math.abs(closest.ageYears - patientAge)
+      const currentDiff = Math.abs(item.ageYears - patientAge)
+      return currentDiff < closestDiff ? item : closest
+    }, null)
+  }
 
   // Helper function to get the latest measurement for a specific field
   const getLatestMeasurementForField = (fieldName) => {
@@ -253,46 +274,170 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     return sortedByDate[sortedByDate.length - 1]
   }
 
-  // Get latest measurement for each type
-  const weightMeasurement = getLatestMeasurementForField('weight')
-  const heightMeasurement = getLatestMeasurementForField('height')
-  const hcMeasurement = getLatestMeasurementForField('headCircumference')
-  const acfaMeasurement = getLatestMeasurementForField('armCircumference')
-  const ssfaMeasurement = getLatestMeasurementForField('subscapularSkinfold')
-  const tsfaMeasurement = getLatestMeasurementForField('tricepsSkinfold')
+  // Helper function to get all measurements for a field with calculated percentiles
+  const getAllMeasurementsWithPercentiles = (fieldName, refData, getRefByAge, getValueFromRef, getLMSFromRef) => {
+    if (!patientData?.measurements || patientData?.measurements.length === 0 || !refData) return []
+    
+    const measurementsWithValue = patientData?.measurements
+      .filter(m => {
+        const value = m[fieldName]
+        return value != null && value !== undefined && value > 0
+      })
+      .map(m => {
+        const ref = getRefByAge(refData, m)
+        if (!ref) return null
+        
+        const value = m[fieldName]
+        const { p3, p25, p50, p75, p97 } = getValueFromRef(ref)
+        const { L, M, S } = getLMSFromRef(ref)
+        
+        const percentile = calculateExactPercentile(value, p3, p25, p50, p75, p97, L, M, S)
+        
+        return {
+          ...m,
+          percentile,
+          ref
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const dateA = new Date(a.date || 0)
+        const dateB = new Date(b.date || 0)
+        return dateA - dateB
+      })
+    
+    return measurementsWithValue
+  }
+
+  // Get all measurements with percentiles for each type
+  const allWeightMeasurements = getAllMeasurementsWithPercentiles(
+    'weight',
+    wfaData,
+    getClosestRefByAge,
+    (ref) => ({ p3: ref.weightP3, p25: ref.weightP25, p50: ref.weightP50, p75: ref.weightP75, p97: ref.weightP97 }),
+    (ref) => ({ L: ref.weightL, M: ref.weightM, S: ref.weightS })
+  )
+  
+  const allHeightMeasurements = getAllMeasurementsWithPercentiles(
+    'height',
+    hfaData,
+    getClosestRefByAge,
+    (ref) => ({ p3: ref.heightP3, p25: ref.heightP25, p50: ref.heightP50, p75: ref.heightP75, p97: ref.heightP97 }),
+    (ref) => ({ L: ref.heightL, M: ref.heightM, S: ref.heightS })
+  )
+  
+  const allHcMeasurements = getAllMeasurementsWithPercentiles(
+    'headCircumference',
+    hcfaData,
+    getClosestRefByAge,
+    (ref) => ({ p3: ref.hcP3, p25: ref.hcP25, p50: ref.hcP50, p75: ref.hcP75, p97: ref.hcP97 }),
+    (ref) => ({ L: ref.hcL, M: ref.hcM, S: ref.hcS })
+  )
+  
+  const allAcfaMeasurements = getAllMeasurementsWithPercentiles(
+    'armCircumference',
+    acfaData,
+    getClosestRefByAge,
+    (ref) => ({ p3: ref.acfaP3, p25: ref.acfaP25, p50: ref.acfaP50, p75: ref.acfaP75, p97: ref.acfaP97 }),
+    (ref) => ({ L: ref.acfaL, M: ref.acfaM, S: ref.acfaS })
+  )
+  
+  const allSsfaMeasurements = getAllMeasurementsWithPercentiles(
+    'subscapularSkinfold',
+    ssfaData,
+    getClosestRefByAge,
+    (ref) => ({ p3: ref.ssfaP3, p25: ref.ssfaP25, p50: ref.ssfaP50, p75: ref.ssfaP75, p97: ref.ssfaP97 }),
+    (ref) => ({ L: ref.ssfaL, M: ref.ssfaM, S: ref.ssfaS })
+  )
+  
+  const allTsfaMeasurements = getAllMeasurementsWithPercentiles(
+    'tricepsSkinfold',
+    tsfaData,
+    getClosestRefByAge,
+    (ref) => ({ p3: ref.tsfaP3, p25: ref.tsfaP25, p50: ref.tsfaP50, p75: ref.tsfaP75, p97: ref.tsfaP97 }),
+    (ref) => ({ L: ref.tsfaL, M: ref.tsfaM, S: ref.tsfaS })
+  )
   
   // For BMI and Weight-for-Height, we need both weight and height
-  const weightHeightMeasurement = (patientData?.measurements || [])
+  const allWeightHeightMeasurements = (patientData?.measurements || [])
     .filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
+    .map(m => {
+      const patientHeight = m.height
+      const closest = weightHeightData?.reduce((closest, item) => {
+        if (!closest) return item
+        const closestDiff = Math.abs(closest.height - patientHeight)
+        const currentDiff = Math.abs(item.height - patientHeight)
+        return currentDiff < closestDiff ? item : closest
+      }, null)
+      
+      if (!closest) return null
+      
+      const value = m.weight
+      const { p3, p25, p50, p75, p97 } = { p3: closest.p3, p25: closest.p25, p50: closest.p50, p75: closest.p75, p97: closest.p97 }
+      const { L, M, S } = { L: closest.L, M: closest.M, S: closest.S }
+      
+      const percentile = calculateExactPercentile(value, p3, p25, p50, p75, p97, L, M, S)
+      
+      return {
+        ...m,
+        percentile,
+        ref: closest
+      }
+    })
+    .filter(Boolean)
     .sort((a, b) => {
       const dateA = new Date(a.date || 0)
       const dateB = new Date(b.date || 0)
       return dateA - dateB
     })
-    .pop() || null
+  
+  const allBMIMeasurements = allWeightHeightMeasurements.map(m => {
+    const bmi = calculateBMI(m.weight, m.height)
+    if (!bmi || !bmifaData) return null
+    
+    const ref = getClosestRefByAge(bmifaData, m)
+    if (!ref || !ref.bmiP50) return null
+    
+    const { p3, p25, p50, p75, p97 } = { p3: ref.bmiP3, p25: ref.bmiP25, p50: ref.bmiP50, p75: ref.bmiP75, p97: ref.bmiP97 }
+    const { L, M, S } = { L: ref.bmiL, M: ref.bmiM, S: ref.bmiS }
+    
+    const percentile = calculateExactPercentile(bmi, p3, p25, p50, p75, p97, L, M, S)
+    
+    return {
+      ...m,
+      bmi,
+      percentile,
+      ref
+    }
+  }).filter(Boolean)
 
-  const getClosestRefByAge = (data, measurement) => {
-    if (!data || !measurement) return null
-    const patientAge = measurement.ageYears
-    return data.reduce((closest, item) => {
-      if (!closest) return item
-      const closestDiff = Math.abs(closest.ageYears - patientAge)
-      const currentDiff = Math.abs(item.ageYears - patientAge)
-      return currentDiff < closestDiff ? item : closest
-    }, null)
+  // Get selected measurement or default to latest
+  const getSelectedMeasurement = (measurements, selectedId, fieldName) => {
+    if (!measurements || measurements.length === 0) return null
+    if (selectedId) {
+      const selected = measurements.find(m => m.id === selectedId)
+      if (selected) return selected
+    }
+    return measurements[measurements.length - 1]
   }
 
-  const weightRef = getClosestRefByAge(wfaData, weightMeasurement)
-  const heightRef = getClosestRefByAge(hfaData, heightMeasurement)
-  const hcRef = getClosestRefByAge(hcfaData, hcMeasurement)
-  const bmiRef = getClosestRefByAge(bmifaData, weightHeightMeasurement)
-  const acfaRef = getClosestRefByAge(acfaData, acfaMeasurement)
-  const ssfaRef = getClosestRefByAge(ssfaData, ssfaMeasurement)
-  const tsfaRef = getClosestRefByAge(tsfaData, tsfaMeasurement)
+  const weightMeasurement = getSelectedMeasurement(allWeightMeasurements, selectedMeasurements.weight, 'weight')
+  const heightMeasurement = getSelectedMeasurement(allHeightMeasurements, selectedMeasurements.height, 'height')
+  const hcMeasurement = getSelectedMeasurement(allHcMeasurements, selectedMeasurements.headCircumference, 'headCircumference')
+  const acfaMeasurement = getSelectedMeasurement(allAcfaMeasurements, selectedMeasurements.armCircumference, 'armCircumference')
+  const ssfaMeasurement = getSelectedMeasurement(allSsfaMeasurements, selectedMeasurements.subscapularSkinfold, 'subscapularSkinfold')
+  const tsfaMeasurement = getSelectedMeasurement(allTsfaMeasurements, selectedMeasurements.tricepsSkinfold, 'tricepsSkinfold')
+  const weightHeightMeasurement = getSelectedMeasurement(allWeightHeightMeasurements, selectedMeasurements.weightHeight, 'weightHeight')
   
-  const patientBMI = weightHeightMeasurement 
-    ? calculateBMI(weightHeightMeasurement.weight, weightHeightMeasurement.height)
-    : null
+  const bmiMeasurement = getSelectedMeasurement(allBMIMeasurements, selectedMeasurements.bmi, 'bmi')
+
+  // Get references from selected measurements (they already have ref attached)
+  const weightRef = weightMeasurement?.ref || getClosestRefByAge(wfaData, weightMeasurement)
+  const heightRef = heightMeasurement?.ref || getClosestRefByAge(hfaData, heightMeasurement)
+  const hcRef = hcMeasurement?.ref || getClosestRefByAge(hcfaData, hcMeasurement)
+  const acfaRef = acfaMeasurement?.ref || getClosestRefByAge(acfaData, acfaMeasurement)
+  const ssfaRef = ssfaMeasurement?.ref || getClosestRefByAge(ssfaData, ssfaMeasurement)
+  const tsfaRef = tsfaMeasurement?.ref || getClosestRefByAge(tsfaData, tsfaMeasurement)
 
   const createBoxPlotData = (p3, p25, p50, p75, p97, patientValue, unit, label, source, L, M, S, measurementDate) => {
     if (!patientValue) return null
@@ -350,20 +495,20 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       )
     : null
 
-  const whData = (weightHeightMeasurement && weightHeightMeasurement.height && weightHeightMeasurement.weight && whReference)
+  const whData = (weightHeightMeasurement && weightHeightMeasurement.height && weightHeightMeasurement.weight && weightHeightMeasurement.ref)
     ? createBoxPlotData(
-        whReference.p3,
-        whReference.p25,
-        whReference.p50,
-        whReference.p75,
-        whReference.p97,
+        weightHeightMeasurement.ref.p3,
+        weightHeightMeasurement.ref.p25,
+        weightHeightMeasurement.ref.p50,
+        weightHeightMeasurement.ref.p75,
+        weightHeightMeasurement.ref.p97,
         weightHeightMeasurement.weight,
         'kg',
         'Weight for Height',
         getSourceLabel(referenceSources?.wfh),
-        whReference.L,
-        whReference.M,
-        whReference.S,
+        weightHeightMeasurement.ref.L,
+        weightHeightMeasurement.ref.M,
+        weightHeightMeasurement.ref.S,
         weightHeightMeasurement.date
       )
     : null
@@ -386,21 +531,21 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       )
     : null
 
-  const bmiData = (referenceSources?.age === 'who' && patientBMI != null && bmiRef && bmiRef.bmiP50 != null)
+  const bmiData = (referenceSources?.age === 'who' && bmiMeasurement && bmiMeasurement.bmi != null && bmiMeasurement.ref && bmiMeasurement.ref.bmiP50 != null)
     ? createBoxPlotData(
-        bmiRef.bmiP3,
-        bmiRef.bmiP25,
-        bmiRef.bmiP50,
-        bmiRef.bmiP75,
-        bmiRef.bmiP97,
-        patientBMI,
+        bmiMeasurement.ref.bmiP3,
+        bmiMeasurement.ref.bmiP25,
+        bmiMeasurement.ref.bmiP50,
+        bmiMeasurement.ref.bmiP75,
+        bmiMeasurement.ref.bmiP97,
+        bmiMeasurement.bmi,
         'kg/m²',
         'BMI for Age',
         'WHO',
-        bmiRef.bmiL,
-        bmiRef.bmiM,
-        bmiRef.bmiS,
-        weightHeightMeasurement?.date
+        bmiMeasurement.ref.bmiL,
+        bmiMeasurement.ref.bmiM,
+        bmiMeasurement.ref.bmiS,
+        bmiMeasurement.date
       )
     : null
 
@@ -458,7 +603,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       )
     : null
 
-  const renderBoxPlot = (data) => {
+  const renderBoxPlot = (data, allMeasurements, fieldKey) => {
     if (!data) return null
 
     // Calculate range including patient value to ensure marker is visible
@@ -516,17 +661,55 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       }
     }
 
+    const formatPercentile = (percentile) => {
+      if (percentile < 3) {
+        return `< ${percentile.toFixed(1)}th`
+      } else if (percentile >= 97) {
+        return `> ${percentile.toFixed(1)}th`
+      } else {
+        return `${percentile.toFixed(1)}th`
+      }
+    }
+
+    const handleMeasurementChange = (e) => {
+      const selectedId = e.target.value
+      setSelectedMeasurements(prev => ({
+        ...prev,
+        [fieldKey]: selectedId || null
+      }))
+    }
+
+    const currentMeasurementId = selectedMeasurements[fieldKey] || (allMeasurements && allMeasurements.length > 0 ? allMeasurements[allMeasurements.length - 1].id : null)
+
     return (
       <div key={data.label} className="box-plot-item">
-        <h3>
-          {data.label} ({data.unit}) 
-          {data.source && <span className="chart-source">({data.source})</span>}
-          {data.measurementDate && (
-            <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 'normal', marginLeft: '0.5rem' }}>
-              - {formatDate(data.measurementDate)}
-            </span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0 }}>
+            {data.label} ({useImperial && (data.unit === 'kg' || data.unit === 'cm') ? `${data.unit} / ${data.unit === 'kg' ? 'lb' : 'in'}` : data.unit}) 
+            {data.source && <span className="chart-source">({data.source})</span>}
+          </h3>
+          {allMeasurements && allMeasurements.length > 1 && (
+            <select
+              value={currentMeasurementId || ''}
+              onChange={handleMeasurementChange}
+              style={{
+                padding: '0.4rem 0.8rem',
+                fontSize: '0.9rem',
+                border: '1px solid #ccc',
+                borderRadius: '4px',
+                backgroundColor: 'white',
+                cursor: 'pointer',
+                minWidth: '200px'
+              }}
+            >
+              {allMeasurements.map(m => (
+                <option key={m.id} value={m.id}>
+                  {formatDate(m.date)} - {formatPercentile(m.percentile)}
+                </option>
+              ))}
+            </select>
           )}
-        </h3>
+        </div>
         <div className="box-plot-content">
           <div className="box-plot-visual">
             <svg width="100%" height="200" viewBox="0 0 380 200" preserveAspectRatio="xMidYMid meet" style={{ maxWidth: '100%', height: 'auto' }}>
@@ -585,7 +768,13 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
               <text x="260" y={boxBottom + 4} fontSize="10" fill="#666">25th: {data.q1.toFixed(1)}</text>
               <text x="260" y={yPos(data.min) + 4} fontSize="10" fill="#666">3rd: {data.min.toFixed(1)}</text>
 
-              <text x="140" y={patientY + 5} textAnchor="end" fontSize="12" fill="#000" fontWeight="bold">Patient: {data.patient.toFixed(1)} {data.unit}</text>
+              <text x="140" y={patientY + 5} textAnchor="end" fontSize="12" fill="#000" fontWeight="bold">
+                Patient: {useImperial && data.unit === 'kg' 
+                  ? formatWeight(data.patient, true)
+                  : useImperial && data.unit === 'cm'
+                  ? formatLength(data.patient, true)
+                  : `${data.patient.toFixed(data.unit === 'kg' ? 3 : 1)} ${data.unit}`}
+              </text>
               <text x="140" y={patientY + 20} textAnchor="end" fontSize="10" fill="#666">({patientPercentile} percentile)</text>
             </svg>
           </div>
@@ -603,14 +792,14 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       </p>
       
       <div className="box-plots-container">
-        {weightData && renderBoxPlot(weightData)}
-        {heightData && renderBoxPlot(heightData)}
-        {whData && renderBoxPlot(whData)}
-        {hcData && renderBoxPlot(hcData)}
-        {bmiData && renderBoxPlot(bmiData)}
-        {acfaBoxData && renderBoxPlot(acfaBoxData)}
-        {ssfaBoxData && renderBoxPlot(ssfaBoxData)}
-        {tsfaBoxData && renderBoxPlot(tsfaBoxData)}
+        {weightData && renderBoxPlot(weightData, allWeightMeasurements, 'weight')}
+        {heightData && renderBoxPlot(heightData, allHeightMeasurements, 'height')}
+        {whData && renderBoxPlot(whData, allWeightHeightMeasurements, 'weightHeight')}
+        {hcData && renderBoxPlot(hcData, allHcMeasurements, 'headCircumference')}
+        {bmiData && renderBoxPlot(bmiData, allBMIMeasurements, 'bmi')}
+        {acfaBoxData && renderBoxPlot(acfaBoxData, allAcfaMeasurements, 'armCircumference')}
+        {ssfaBoxData && renderBoxPlot(ssfaBoxData, allSsfaMeasurements, 'subscapularSkinfold')}
+        {tsfaBoxData && renderBoxPlot(tsfaBoxData, allTsfaMeasurements, 'tricepsSkinfold')}
       </div>
     </div>
   )
