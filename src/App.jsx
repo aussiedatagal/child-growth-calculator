@@ -3,6 +3,8 @@ import './App.css'
 import DataInputForm from './components/DataInputForm'
 import GrowthCharts from './components/GrowthCharts'
 import BoxWhiskerPlots from './components/BoxWhiskerPlots'
+import Toast from './components/Toast'
+import PrivacyPolicy from './components/PrivacyPolicy'
 import { getPersonId, calculateAge, recalculatePersonAges } from './utils/personUtils'
 
 function App() {
@@ -61,6 +63,9 @@ function App() {
     }
     return { age: 'who', wfh: 'who' }
   })
+
+  const [toast, setToast] = useState({ show: false, message: '' })
+  const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false)
 
   const patientData = useMemo(() => {
     if (!selectedPersonId) return null
@@ -138,6 +143,7 @@ function App() {
     }))
 
     setSelectedPersonId(id)
+    setToast({ show: true, message: 'Patient information saved' })
     return id
   }
 
@@ -189,6 +195,7 @@ function App() {
       })
       
       setSelectedPersonId(otherPerson.id)
+      setToast({ show: true, message: 'Patient information saved' })
     } 
     else {
       setPeople(prev => {
@@ -206,6 +213,7 @@ function App() {
           [selectedPersonId]: updatedPerson
         }
       })
+      setToast({ show: true, message: 'Patient information saved' })
     }
   }
 
@@ -234,6 +242,7 @@ function App() {
         [selectedPersonId]: { ...person, measurements: updated }
       }
     })
+    setToast({ show: true, message: 'Measurement saved' })
   }
 
   const handleUpdateMeasurement = (id, updatedMeasurement) => {
@@ -252,6 +261,7 @@ function App() {
         [selectedPersonId]: { ...person, measurements: updated }
       }
     })
+    setToast({ show: true, message: 'Measurement updated' })
   }
 
   const handleDeleteMeasurement = (id) => {
@@ -269,6 +279,7 @@ function App() {
         }
       }
     })
+    setToast({ show: true, message: 'Measurement deleted' })
   }
 
   const handleClearMeasurements = () => {
@@ -306,6 +317,7 @@ function App() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+    setToast({ show: true, message: 'Data exported successfully' })
   }
 
   const handleImportData = (data) => {
@@ -411,6 +423,7 @@ function App() {
     if (data.sources) {
       setReferenceSources(data.sources)
     }
+    setToast({ show: true, message: 'Data imported successfully' })
   }
 
   return (
@@ -471,7 +484,35 @@ function App() {
         <p>
           This tool is for informational purposes only. Always consult with healthcare professionals for medical decisions.
         </p>
+        <p>
+          <a href="https://github.com/aussiedatagal/child-growth-calculator" target="_blank" rel="noopener noreferrer">View on GitHub</a> | 
+          <button 
+            onClick={() => setShowPrivacyPolicy(true)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#667eea',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              padding: 0,
+              marginLeft: '0.5rem',
+              font: 'inherit'
+            }}
+          >
+            Privacy Policy
+          </button>
+        </p>
       </footer>
+      
+      <Toast 
+        message={toast.message}
+        show={toast.show}
+        onClose={() => setToast({ show: false, message: '' })}
+      />
+      
+      {showPrivacyPolicy && (
+        <PrivacyPolicy onClose={() => setShowPrivacyPolicy(false)} />
+      )}
     </div>
   )
 }

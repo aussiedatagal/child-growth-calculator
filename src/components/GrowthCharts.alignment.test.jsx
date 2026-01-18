@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { parseCsv, toAgeYears, normalizeP3P15P50P85P97 } from '../utils/chartUtils'
+import { toAgeYears, normalizeP3P15P50P85P97 } from '../utils/chartUtils'
 
 /**
  * Golden Alignment Point Test
@@ -29,10 +29,10 @@ describe('Golden Alignment Point: 42 Weeks GA (2 Weeks Corrected Age)', () => {
     const fentonP50Raw = parseFloat(fenton42Week.p50 || fenton42Week.M)
     const fentonP50 = fentonP50Raw / 1000 // Convert from grams to kilograms
     
-    // Load actual WHO data using filesystem
-    const whoPath = join(process.cwd(), 'public', 'data', 'wfa_boys_who.csv')
-    const whoText = readFileSync(whoPath, 'utf-8')
-    const whoRows = parseCsv(whoText)
+    // Load actual WHO data using filesystem (now JSON format)
+    const whoPath = join(process.cwd(), 'public', 'data', 'wfa_boys_who.json')
+    const whoFile = readFileSync(whoPath, 'utf-8')
+    const whoRows = JSON.parse(whoFile)
     
     // Find WHO value at 2 weeks corrected age (0.038 years)
     // 2 weeks = 2 / 52.1775 = ~0.038 years = ~0.5 months

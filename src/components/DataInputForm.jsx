@@ -708,10 +708,11 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       name="weight"
                       value={formData.weight}
                       onChange={handleInputChange}
-                      step="0.01"
+                      step="0.001"
                       min="0"
-                      placeholder="e.g., 12.3"
+                      placeholder="e.g., 3.250"
                     />
+                    <small>Enter weight in kilograms. Supports gram precision (e.g., 3.250 kg = 3250 g)</small>
                   </div>
 
                   <div className="form-group">
@@ -953,7 +954,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                   value={editData.weight}
                                   onChange={(e) => handleInlineEditChange('weight', e.target.value)}
                                   placeholder="kg"
-                                  step="0.01"
+                                  step="0.001"
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (

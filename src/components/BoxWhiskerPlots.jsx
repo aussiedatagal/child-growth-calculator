@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import './BoxWhiskerPlots.css'
 import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, calculateBMI } from '../utils/chartUtils'
+import { loadReferenceData as loadCachedReferenceData } from '../utils/referenceDataCache'
 
 function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange }) {
   const [wfaData, setWfaData] = useState(null)
@@ -26,47 +27,10 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     try {
       const gKey = genderToKey(patientData?.gender || 'male')
       const ageSource = referenceSources?.age || 'who'
-      const baseUrl = import.meta.env.BASE_URL
-
-      const wfaPath = `${baseUrl}data/wfa_${gKey}_${ageSource}.csv`
-      const hcfaPath = `${baseUrl}data/hcfa_${gKey}_${ageSource}.csv`
-      const heightPaths =
-        ageSource === 'who'
-          ? [`${baseUrl}data/lhfa_${gKey}_who.csv`]
-          : [`${baseUrl}data/lhfa_${gKey}_cdc.csv`, `${baseUrl}data/hfa_${gKey}_cdc.csv`]
-
-      const wflPath = `${baseUrl}data/wfl_${gKey}_${ageSource}.csv`
-      const wfhPath = `${baseUrl}data/wfh_${gKey}_${ageSource}.csv`
-      const bmifaPath = `${baseUrl}data/bmifa_${gKey}_who.csv` // BMI-for-age only available from WHO
-      const acfaPath = `${baseUrl}data/acfa_${gKey}_who.csv`   // arm circumference-for-age (WHO only)
-      const ssfaPath = `${baseUrl}data/ssfa_${gKey}_who.csv`   // subscapular skinfold-for-age (WHO only)
-      const tsfaPath = `${baseUrl}data/tsfa_${gKey}_who.csv`   // triceps skinfold-for-age (WHO only)
-
-      const fetchAll = await Promise.all([
-        fetch(wfaPath),
-        fetch(hcfaPath),
-        ...heightPaths.map(p => fetch(p)),
-        fetch(wflPath),
-        fetch(wfhPath),
-        fetch(bmifaPath),
-        fetch(acfaPath),
-        fetch(ssfaPath),
-        fetch(tsfaPath),
-      ])
-
-      const texts = await Promise.all(fetchAll.map(r => r.text()))
-      const [wfaText, hcfaText, ...rest] = texts
-      const n = rest.length
-      const wflText = rest[n - 6]
-      const wfhText = rest[n - 5]
-      const bmifaText = rest[n - 4]
-      const acfaText = rest[n - 3]
-      const ssfaText = rest[n - 2]
-      const tsfaText = rest[n - 1]
-      const heightTexts = rest.slice(0, n - 6)
-
-      const wfaRows = parseCsv(wfaText)
-      const hcfaRows = parseCsv(hcfaText)
+      
+      // Use shared cache to avoid duplicate downloads
+      const { wfaRows, hcfaRows, heightRows, wflRows, wfhRows, bmifaRows, acfaRows, ssfaRows, tsfaRows } = 
+        await loadCachedReferenceData(gKey, ageSource)
 
       const wfaProcessed = wfaRows
         .map(r => {
@@ -88,7 +52,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
 
-      const heightRowsList = heightTexts.map(parseCsv)
+      const heightRowsList = heightRows
       const heightCombinedRows =
         ageSource === 'who'
           ? heightRowsList[0]
@@ -114,8 +78,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
 
-      const wflRows = parseCsv(wflText)
-      const wfhRows = parseCsv(wfhText)
+      // wflRows and wfhRows are already loaded from JSON
 
       const normalizeWHRow = (r, axis) => {
         const height = axis === 'Length' ? r.Length : r.Height
@@ -132,7 +95,6 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         ...wfhProcessed.filter(d => d.height >= 85),
       ].sort((a, b) => a.height - b.height)
 
-      const bmifaRows = parseCsv(bmifaText)
       const bmifaProcessed = bmifaRows
         .map(r => {
           const ageYears = toAgeYears(r.Month)
@@ -143,7 +105,6 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
 
-      const acfaRows = parseCsv(acfaText)
       const acfaProcessed = acfaRows
         .map(r => {
           const ageYears = toAgeYears(r.Month)
@@ -154,7 +115,6 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
 
-      const ssfaRows = parseCsv(ssfaText)
       const ssfaProcessed = ssfaRows
         .map(r => {
           const ageYears = toAgeYears(r.Month)
@@ -165,7 +125,6 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
         .filter(Boolean)
         .sort((a, b) => a.ageYears - b.ageYears)
 
-      const tsfaRows = parseCsv(tsfaText)
       const tsfaProcessed = tsfaRows
         .map(r => {
           const ageYears = toAgeYears(r.Month)
