@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useCallback, memo } from 'react'
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LabelList, ReferenceLine, Tooltip } from 'recharts'
 import './GrowthCharts.css'
 import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, formatAgeLabel, calculateBMI } from '../utils/chartUtils'
 import { calculateCorrectedAge } from '../utils/personUtils'
 import { loadReferenceData as loadCachedReferenceData } from '../utils/referenceDataCache'
+import { formatWeight, formatLength, kgToPounds, cmToInches, poundsToKg, inchesToCm } from '../utils/unitConversion'
 
 const AGE_SOURCES = [
   { value: 'who', label: 'WHO' },
@@ -110,7 +111,7 @@ const getGestationalAge = (patientData) => {
     : patientData.gestationalAgeAtBirth
 }
 
-const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter, chartType, patientData }) => {
+const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter, chartType, patientData, useImperial = false }) => {
   if (!active || !payload || !payload.length) return null
   
   const sortedPayload = [...payload].sort((a, b) => {
@@ -218,10 +219,23 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
           // Format value with unit
           let displayValue = value
           if (typeof value === 'number' && unit && !name.toLowerCase().includes(unit.toLowerCase())) {
-            if (chartType === 'weight' || chartType === 'bmi') {
-              displayValue = `${value.toFixed(2)} ${unit}`
+            if (useImperial && (chartType === 'weight' || chartType === 'height' || chartType === 'hc' || chartType === 'ac')) {
+              // Show both metric and imperial
+              if (chartType === 'weight') {
+                const kg = value.toFixed(2)
+                const lb = kgToPounds(value).toFixed(1)
+                displayValue = `${kg} kg (${lb} lb)`
+              } else {
+                const cm = value.toFixed(1)
+                const inches = cmToInches(value).toFixed(1)
+                displayValue = `${cm} cm (${inches} in)`
+              }
             } else {
-              displayValue = `${value.toFixed(1)} ${unit}`
+              if (chartType === 'weight' || chartType === 'bmi') {
+                displayValue = `${value.toFixed(2)} ${unit}`
+              } else {
+                displayValue = `${value.toFixed(1)} ${unit}`
+              }
             }
           }
           
@@ -285,7 +299,7 @@ const createAgeTickFormatter = () => {
   }
 }
 
-function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange }) {
+function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false }) {
   const [wfaData, setWfaData] = useState(null)
   const [hfaData, setHfaData] = useState(null) // height-for-age (WHO lhfa; CDC lhfa+hfa merge)
   const [hcfaData, setHcfaData] = useState(null)
@@ -301,7 +315,29 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const [intergrowthHCData, setIntergrowthHCData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isRendering, setIsRendering] = useState(true)
-
+  
+  // Zoom state for each chart type
+  const [zoomDomains, setZoomDomains] = useState({
+    wfa: null,
+    hfa: null,
+    hcfa: null,
+    bmi: null,
+    acfa: null,
+    ssfa: null,
+    tsfa: null,
+    wh: null
+  })
+  
+  // Drag zoom state
+  const [dragZoom, setDragZoom] = useState({
+    active: false,
+    startX: null,
+    startY: null,
+    endX: null,
+    endY: null,
+    chartType: null
+  })
+  
   useEffect(() => {
     loadReferenceData()
   }, [patientData?.gender, referenceSources?.age])
@@ -1326,9 +1362,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       .filter((v, i, a) => i === 0 || Math.abs(v.ageYears - a[i-1].ageYears) > 0.0001)
   }, [])
 
-  const ageDomain = useMemo(() => calculateAgeDomain(patientData?.measurements), [calculateAgeDomain, patientData?.measurements])
+  const baseAgeDomain = useMemo(() => calculateAgeDomain(patientData?.measurements), [calculateAgeDomain, patientData?.measurements])
   
-  const preemieDomain = useMemo(() => {
+  const basePreemieDomain = useMemo(() => {
     const gaAtBirth = getGestationalAge(patientData)
     
     if (!patientData?.gestationalAgeAtBirth || gaAtBirth >= 40) {
@@ -1375,31 +1411,339 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     return [minWeeks, maxWeeks]
   }, [patientData?.gestationalAgeAtBirth, patientData?.birthDate, patientData?.measurements])
   
-  const filterDataByAge = useCallback((data) => {
+  // Get effective domain (zoom or base) - must be defined after base domains
+  const getEffectiveDomain = useCallback((chartType, isPreemie) => {
+    const zoomDomain = zoomDomains[chartType]
+    if (zoomDomain) return zoomDomain
+    return isPreemie ? (basePreemieDomain || baseAgeDomain) : baseAgeDomain
+  }, [zoomDomains, basePreemieDomain, baseAgeDomain])
+  
+  // Helper to get domain for a specific chart
+  const getChartDomain = useCallback((chartType, isPreemie) => {
+    return getEffectiveDomain(chartType, isPreemie) || (isPreemie ? basePreemieDomain : baseAgeDomain)
+  }, [getEffectiveDomain, basePreemieDomain, baseAgeDomain])
+  
+  // Zoom functions
+  const zoomIn = useCallback((chartType, isPreemie) => {
+    const currentDomain = getChartDomain(chartType, isPreemie)
+    if (!currentDomain) return
+    
+    const baseDomain = isPreemie ? basePreemieDomain : baseAgeDomain
+    if (!baseDomain) return
+    
+    const [baseMin, baseMax] = baseDomain
+    const [min, max] = currentDomain
+    const range = max - min
+    const center = (min + max) / 2
+    const newRange = range * 0.7 // Zoom in by 30%
+    let newMin = center - newRange / 2
+    let newMax = center + newRange / 2
+    
+    // Clamp to base domain boundaries
+    if (newMin < baseMin) {
+      newMin = baseMin
+      newMax = Math.min(baseMax, newMin + newRange)
+    }
+    if (newMax > baseMax) {
+      newMax = baseMax
+      newMin = Math.max(baseMin, newMax - newRange)
+    }
+    
+    // Ensure minimum range to prevent zooming too far
+    if (newMax - newMin < (baseMax - baseMin) * 0.01) {
+      return // Don't zoom in if range would be too small
+    }
+    
+    setZoomDomains(prev => ({
+      ...prev,
+      [chartType]: [newMin, newMax]
+    }))
+  }, [getChartDomain, basePreemieDomain, baseAgeDomain])
+  
+  const zoomOut = useCallback((chartType, isPreemie) => {
+    const currentDomain = getChartDomain(chartType, isPreemie)
+    if (!currentDomain) return
+    
+    const baseDomain = isPreemie ? basePreemieDomain : baseAgeDomain
+    if (!baseDomain) return
+    
+    const [baseMin, baseMax] = baseDomain
+    const [min, max] = currentDomain
+    const range = max - min
+    const center = (min + max) / 2
+    const newRange = range / 0.7 // Zoom out by 30%
+    
+    let newMin = center - newRange / 2
+    let newMax = center + newRange / 2
+    
+    // Clamp to base domain boundaries
+    newMin = Math.max(baseMin, newMin)
+    newMax = Math.min(baseMax, newMax)
+    
+    // If we've zoomed out to or beyond the base domain, reset zoom
+    const tolerance = (baseMax - baseMin) * 0.001 // 0.1% tolerance
+    if (newMin <= baseMin + tolerance && newMax >= baseMax - tolerance) {
+      setZoomDomains(prev => {
+        const updated = { ...prev }
+        delete updated[chartType]
+        return updated
+      })
+    } else {
+      setZoomDomains(prev => ({
+        ...prev,
+        [chartType]: [newMin, newMax]
+      }))
+    }
+  }, [getChartDomain, basePreemieDomain, baseAgeDomain])
+  
+  const resetZoom = useCallback((chartType) => {
+    setZoomDomains(prev => ({
+      ...prev,
+      [chartType]: null
+    }))
+  }, [])
+  
+  const getChartMargins = useCallback(() => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+    const topMargin = (patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40) ? 25 : 10
+    return { 
+      top: topMargin, 
+      right: isMobile ? 30 : 70, 
+      left: isMobile ? 0 : 40, 
+      bottom: isMobile ? 20 : 40
+    }
+  }, [patientData?.gestationalAgeAtBirth])
+  
+  // Handle drag zoom
+  const handleMouseDown = useCallback((e, chartType, isPreemie) => {
+    if (e.button !== 0) return // Only left mouse button
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    setDragZoom({
+      active: true,
+      startX: x,
+      startY: y,
+      endX: x,
+      endY: y,
+      chartType
+    })
+  }, [])
+  
+  const handleMouseMove = useCallback((e) => {
+    if (!dragZoom.active) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    setDragZoom(prev => ({
+      ...prev,
+      endX: x,
+      endY: y
+    }))
+  }, [dragZoom.active])
+  
+  const handleMouseUp = useCallback((e, isPreemie) => {
+    if (!dragZoom.active) return
+    
+    const { startX, endX, chartType } = dragZoom
+    const minX = Math.min(startX, endX)
+    const maxX = Math.max(startX, endX)
+    const width = maxX - minX
+    
+    // Only zoom if drag was significant (at least 20px)
+    if (width > 20) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const chartWidth = rect.width
+      const margins = getChartMargins()
+      const plotWidth = chartWidth - margins.left - margins.right
+      
+      const baseDomain = isPreemie ? basePreemieDomain : baseAgeDomain
+      if (!baseDomain) {
+        setDragZoom({ active: false, startX: null, startY: null, endX: null, endY: null, chartType: null })
+        return
+      }
+      
+      const [baseMin, baseMax] = baseDomain
+      const domainRange = baseMax - baseMin
+      
+      // Convert pixel positions to data domain values
+      // Account for margins - x coordinates are relative to the container
+      const startRatio = Math.max(0, Math.min(1, (minX - margins.left) / plotWidth))
+      const endRatio = Math.max(0, Math.min(1, (maxX - margins.left) / plotWidth))
+      
+      const newMin = baseMin + (startRatio * domainRange)
+      const newMax = baseMin + (endRatio * domainRange)
+      
+      // Clamp to base domain
+      const clampedMin = Math.max(baseMin, newMin)
+      const clampedMax = Math.min(baseMax, newMax)
+      
+      if (clampedMax > clampedMin) {
+        setZoomDomains(prev => ({
+          ...prev,
+          [chartType]: [clampedMin, clampedMax]
+        }))
+      }
+    }
+    
+    setDragZoom({ active: false, startX: null, startY: null, endX: null, endY: null, chartType: null })
+  }, [dragZoom, basePreemieDomain, baseAgeDomain, getChartMargins])
+  
+  const handleMouseLeave = useCallback(() => {
+    if (dragZoom.active) {
+      setDragZoom({ active: false, startX: null, startY: null, endX: null, endY: null, chartType: null })
+    }
+  }, [dragZoom.active])
+  
+  // Zoomable chart wrapper
+  const ZoomableChart = ({ children, chartType, isPreemie }) => {
+    const containerRef = useRef(null)
+    
+    const selectionStyle = dragZoom.active && dragZoom.chartType === chartType ? {
+      position: 'absolute',
+      left: `${Math.min(dragZoom.startX, dragZoom.endX)}px`,
+      top: '0px',
+      width: `${Math.abs(dragZoom.endX - dragZoom.startX)}px`,
+      height: '100%',
+      border: '2px dashed #667eea',
+      backgroundColor: 'rgba(102, 126, 234, 0.1)',
+      pointerEvents: 'none',
+      zIndex: 10
+    } : null
+    
+    return (
+      <div
+        ref={containerRef}
+        style={{ position: 'relative', cursor: dragZoom.active && dragZoom.chartType === chartType ? 'crosshair' : 'default' }}
+        onMouseDown={(e) => handleMouseDown(e, chartType, isPreemie)}
+        onMouseMove={handleMouseMove}
+        onMouseUp={(e) => handleMouseUp(e, isPreemie)}
+        onMouseLeave={handleMouseLeave}
+      >
+        {children}
+        {selectionStyle && <div style={selectionStyle} />}
+      </div>
+    )
+  }
+  
+  // Helper component for zoom controls
+  const ZoomControls = ({ chartType, isPreemie }) => {
+    const hasZoom = zoomDomains[chartType] != null
+    return (
+      <div style={{ display: 'flex', gap: '0.25rem' }}>
+        <button
+          onClick={() => zoomIn(chartType, isPreemie)}
+          style={{
+            padding: '0.25rem 0.5rem',
+            fontSize: '0.85rem',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            background: 'white',
+            cursor: 'pointer'
+          }}
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          onClick={() => zoomOut(chartType, isPreemie)}
+          style={{
+            padding: '0.25rem 0.5rem',
+            fontSize: '0.85rem',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            background: 'white',
+            cursor: 'pointer'
+          }}
+          title="Zoom out"
+        >
+          −
+        </button>
+        {hasZoom && (
+          <button
+            onClick={() => resetZoom(chartType)}
+            style={{
+              padding: '0.25rem 0.5rem',
+              fontSize: '0.85rem',
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+              background: 'white',
+              cursor: 'pointer'
+            }}
+            title="Reset zoom"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+    )
+  }
+  
+  const filterDataByAge = useCallback((data, chartType) => {
     if (!data) return []
+    const isPreemie = patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40
+    const domain = getChartDomain(chartType, isPreemie)
+    if (!domain) return data
+    
     // For preemie charts using xAxisValue (weeks), filter by xAxisValue instead of ageYears
-    if (patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && preemieDomain) {
-      // Filter by xAxisValue (weeks) for preemie charts
+    if (isPreemie) {
       return data.filter(item => {
         const xValue = item.xAxisValue != null ? item.xAxisValue : item.ageYears
         return xValue != null && 
-               xValue >= preemieDomain[0] && 
-               xValue <= preemieDomain[1]
+               xValue >= domain[0] && 
+               xValue <= domain[1]
       })
     }
     // For term charts, filter by ageYears
     return data.filter(item => 
       item.ageYears != null && 
-      item.ageYears >= ageDomain[0] && 
-      item.ageYears <= ageDomain[1]
+      item.ageYears >= domain[0] && 
+      item.ageYears <= domain[1]
     )
-  }, [ageDomain, preemieDomain, patientData?.gestationalAgeAtBirth])
+  }, [getChartDomain, patientData?.gestationalAgeAtBirth])
 
-  const calculateYDomain = useCallback((chartData, valueKeys, patientValue = null) => {
+  const calculateYDomain = useCallback((chartData, valueKeys, chartType, isPreemie) => {
     if (!chartData || chartData.length === 0) return ['auto', 'auto']
     
-    return ['auto', 'auto']
-  }, [])
+    // Get the x domain (may be zoomed)
+    const xDomain = getChartDomain(chartType, isPreemie)
+    if (!xDomain) return ['auto', 'auto']
+    
+    // Filter data to only include points within the x domain
+    const filteredData = chartData.filter(item => {
+      const xValue = isPreemie ? (item.xAxisValue != null ? item.xAxisValue : item.ageYears) : item.ageYears
+      return xValue != null && xValue >= xDomain[0] && xValue <= xDomain[1]
+    })
+    
+    if (filteredData.length === 0) return ['auto', 'auto']
+    
+    // Find min and max values across all value keys in the filtered data
+    let minValue = Infinity
+    let maxValue = -Infinity
+    
+    filteredData.forEach(item => {
+      valueKeys.forEach(key => {
+        const value = item[key]
+        if (value != null && typeof value === 'number' && !isNaN(value) && value > 0) {
+          minValue = Math.min(minValue, value)
+          maxValue = Math.max(maxValue, value)
+        }
+      })
+    })
+    
+    // If no valid values found, use auto
+    if (minValue === Infinity || maxValue === -Infinity) {
+      return ['auto', 'auto']
+    }
+    
+    // Add padding (5% on each side)
+    const range = maxValue - minValue
+    const padding = range * 0.05
+    const domainMin = Math.max(0, minValue - padding)
+    const domainMax = maxValue + padding
+    
+    return [domainMin, domainMax]
+  }, [getChartDomain])
 
   const wfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
   const hfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
@@ -1408,6 +1752,24 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
   const acfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
   const ssfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
   const tsfaTickFormatter = useMemo(() => createAgeTickFormatter(), [])
+  
+  // Y-axis tick formatters to limit decimal places
+  const formatYAxisTick = useCallback((value, decimals = 1) => {
+    if (typeof value !== 'number' || isNaN(value)) return String(value)
+    // Round to specified decimal places
+    const rounded = Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals)
+    // Format with appropriate decimal places
+    if (decimals === 0) {
+      return Math.round(rounded).toString()
+    }
+    // For decimals > 0, format and remove trailing zeros
+    return rounded.toFixed(decimals).replace(/\.?0+$/, '')
+  }, [])
+  
+  const formatWeightTick = useCallback((value) => formatYAxisTick(value, 1), [formatYAxisTick])
+  const formatHeightTick = useCallback((value) => formatYAxisTick(value, 0), [formatYAxisTick])
+  const formatBMITick = useCallback((value) => formatYAxisTick(value, 1), [formatYAxisTick])
+  const formatSkinfoldTick = useCallback((value) => formatYAxisTick(value, 1), [formatYAxisTick])
 
   const getPreemieWeightData = useMemo(() => {
     if (!fentonData?.weight && !intergrowthWeightData) return null
@@ -1549,14 +1911,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     )
   }, [whChartDataRaw, heightDomain])
   
-  const wfaChartData = useMemo(() => filterDataByAge(wfaChartDataRaw), [filterDataByAge, wfaChartDataRaw])
-  const hfaChartData = useMemo(() => filterDataByAge(hfaChartDataRaw), [filterDataByAge, hfaChartDataRaw])
-  const hcfaChartData = useMemo(() => filterDataByAge(hcfaChartDataRaw), [filterDataByAge, hcfaChartDataRaw])
-  const bmifaChartData = useMemo(() => filterDataByAge(bmifaChartDataRaw), [filterDataByAge, bmifaChartDataRaw])
-  const acfaChartData = useMemo(() => filterDataByAge(acfaChartDataRaw), [filterDataByAge, acfaChartDataRaw])
-  const ssfaChartData = useMemo(() => filterDataByAge(ssfaChartDataRaw), [filterDataByAge, ssfaChartDataRaw])
-  const tsfaChartData = useMemo(() => filterDataByAge(tsfaChartDataRaw), [filterDataByAge, tsfaChartDataRaw])
-
   const getNumericPercentile = useCallback((percentileStr) => {
     if (!percentileStr) return -1
     if (percentileStr.startsWith('<')) return 0
@@ -1564,17 +1918,27 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     const match = percentileStr.match(/(\d+\.?\d*)/)
     return match ? parseFloat(match[1]) : -1
   }, [])
-
-  const getChartMargins = useCallback(() => {
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-    const topMargin = (patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40) ? 25 : 10
-    return { 
-      top: topMargin, 
-      right: isMobile ? 30 : 70, 
-      left: isMobile ? 0 : 40, 
-      bottom: isMobile ? 20 : 40
-    }
-  }, [patientData?.gestationalAgeAtBirth])
+  
+  const wfaChartDataFiltered = useMemo(() => filterDataByAge(wfaChartDataRaw, 'wfa'), [filterDataByAge, wfaChartDataRaw])
+  const wfaChartData = wfaChartDataFiltered
+  
+  const hfaChartDataFiltered = useMemo(() => filterDataByAge(hfaChartDataRaw, 'hfa'), [filterDataByAge, hfaChartDataRaw])
+  const hfaChartData = hfaChartDataFiltered
+  
+  const hcfaChartDataFiltered = useMemo(() => filterDataByAge(hcfaChartDataRaw, 'hcfa'), [filterDataByAge, hcfaChartDataRaw])
+  const hcfaChartData = hcfaChartDataFiltered
+  
+  const bmifaChartDataFiltered = useMemo(() => filterDataByAge(bmifaChartDataRaw, 'bmi'), [filterDataByAge, bmifaChartDataRaw])
+  const bmifaChartData = bmifaChartDataFiltered
+  
+  const acfaChartDataFiltered = useMemo(() => filterDataByAge(acfaChartDataRaw, 'acfa'), [filterDataByAge, acfaChartDataRaw])
+  const acfaChartData = acfaChartDataFiltered
+  
+  const ssfaChartDataFiltered = useMemo(() => filterDataByAge(ssfaChartDataRaw, 'ssfa'), [filterDataByAge, ssfaChartDataRaw])
+  const ssfaChartData = ssfaChartDataFiltered
+  
+  const tsfaChartDataFiltered = useMemo(() => filterDataByAge(tsfaChartDataRaw, 'tsfa'), [filterDataByAge, tsfaChartDataRaw])
+  const tsfaChartData = tsfaChartDataFiltered
 
   const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, chartData, measurements, getValue) => {
     const measurementsWithValue = measurements && measurements.length > 0
@@ -1597,6 +1961,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
     const lastAge = lastMeasurement?.ageYears
     const patientPercentile = lastValue && lastAge ? getPatientPercentile(lastValue, lastAge, type) : null
     const patientNumeric = getNumericPercentile(patientPercentile)
+    
     
     const dataLength = chartData?.length || 0
     const lastIndex = dataLength > 0 ? dataLength - 1 : -1
@@ -1937,12 +2302,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       
       {/* Age-based Charts Section */}
       <div className="chart-section">
-        <h3 className="section-header">Age-based Charts</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 className="section-header" style={{ margin: 0 }}>Age-based Charts</h3>
+        </div>
         
         {/* 1. Weight-for-Age */}
       {wfaChartData && wfaChartData.length > 0 && (
         <div className="chart-container">
-          <h3>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <h3 style={{ margin: 0 }}>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+            <ZoomControls chartType="wfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40} />
+          </div>
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
             <p className="chart-note" style={{fontSize: '0.85rem', color: '#667eea', marginTop: '5px', marginBottom: '10px', fontStyle: 'italic'}}>
               ⓘ For preemies: Using adjusted age (corrected age) until 2 years old
@@ -1954,6 +2324,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
+          <ZoomableChart chartType="wfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart 
               data={wfaChartData || []} 
@@ -1965,7 +2336,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 dataKey={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? "xAxisValue" : "ageYears"}
                 type="number"
                 scale="linear"
-                domain={preemieDomain || ageDomain}
+                domain={getChartDomain('wfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
                 allowDataOverflow={false}
                 tickFormatter={(value) => {
                   // If we have preemie data, format as weeks for values <= 42 weeks, otherwise as adjusted age
@@ -2008,11 +2379,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 allowDuplicatedCategory={false}
               />
               <YAxis 
-                domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], null)}
-                label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft', offset: 10 }} 
+                domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], 'wfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
+                label={{ value: useImperial ? 'Weight (kg / lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft', offset: 10 }}
+                tickFormatter={formatWeightTick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="weight" patientData={patientData} />}
+                content={<OrderedTooltip chartType="weight" patientData={patientData} useImperial={useImperial} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2023,6 +2395,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData?.measurements, m => m.weight)}
             </LineChart>
           </ResponsiveContainer>
+          </ZoomableChart>
           </div>
           )}
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
@@ -2036,7 +2409,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       {/* 2. Height-for-Age */}
       {hfaChartData && hfaChartData.length > 0 && (
         <div className="chart-container">
-          <h3>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <h3 style={{ margin: 0 }}>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+            <ZoomControls chartType="hfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40} />
+          </div>
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
             <p className="chart-note" style={{fontSize: '0.85rem', color: '#667eea', marginTop: '5px', marginBottom: '10px', fontStyle: 'italic'}}>
               ⓘ For preemies: Using adjusted age (corrected age) until 2 years old
@@ -2048,6 +2424,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
+          <ZoomableChart chartType="hfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={hfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -2055,7 +2432,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 dataKey={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? "xAxisValue" : "ageYears"}
                 type="number"
                 scale="linear"
-                domain={preemieDomain || ageDomain}
+                domain={getChartDomain('hfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
                 allowDataOverflow={false}
                 tickFormatter={(value) => {
                   const gaAtBirth = getGestationalAge(patientData)
@@ -2091,11 +2468,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 allowDuplicatedCategory={false}
               />
               <YAxis 
-                domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], null)}
-                label={{ value: 'Height (cm)', angle: -90, position: 'insideLeft' }} 
+                domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], 'hfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
+                label={{ value: useImperial ? 'Height (cm / in)' : 'Height (cm)', angle: -90, position: 'insideLeft' }}
+                tickFormatter={formatHeightTick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="height" patientData={patientData} />}
+                content={<OrderedTooltip chartType="height" patientData={patientData} useImperial={useImperial} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2106,6 +2484,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData?.measurements, m => m.height)}
             </LineChart>
           </ResponsiveContainer>
+          </ZoomableChart>
           </div>
           )}
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
@@ -2119,7 +2498,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       {/* 4. Head Circumference-for-Age */}
       {hcfaChartData && hcfaChartData.length > 0 && (hcfaData?.[0]?.hcP50 != null) && (
         <div className="chart-container">
-          <h3>Head Circumference-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <h3 style={{ margin: 0 }}>Head Circumference-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+            <ZoomControls chartType="hcfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40} />
+          </div>
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
             <p className="chart-note" style={{fontSize: '0.85rem', color: '#667eea', marginTop: '5px', marginBottom: '10px', fontStyle: 'italic'}}>
               ⓘ For preemies: Using adjusted age (corrected age) until 2 years old
@@ -2131,6 +2513,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
+          <ZoomableChart chartType="hcfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={hcfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -2138,7 +2521,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 dataKey={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? "xAxisValue" : "ageYears"}
                 type="number"
                 scale="linear"
-                domain={preemieDomain || ageDomain}
+                domain={getChartDomain('hcfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
                 allowDataOverflow={false}
                 tickFormatter={(value) => {
                   const gaAtBirth = getGestationalAge(patientData)
@@ -2175,11 +2558,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 allowDataOverflow={false}
               />
               <YAxis 
-                domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], null)}
+                domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], 'hcfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
                 label={createYAxisLabel('Head Circumference (cm)')}
+                tickFormatter={formatHeightTick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="hc" patientData={patientData} />}
+                content={<OrderedTooltip chartType="hc" patientData={patientData} useImperial={useImperial} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2190,6 +2574,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData?.measurements, m => m.headCircumference)}
             </LineChart>
           </ResponsiveContainer>
+          </ZoomableChart>
           </div>
           )}
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
@@ -2203,13 +2588,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
       {/* 5. BMI-for-Age (WHO only) */}
       {referenceSources?.age === 'who' && bmifaChartData && bmifaChartData.length > 0 && (
         <div className="chart-container">
-          <h3>BMI-for-Age <span className="chart-source">(WHO)</span></h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <h3 style={{ margin: 0 }}>BMI-for-Age <span className="chart-source">(WHO)</span></h3>
+            <ZoomControls chartType="bmi" isPreemie={false} />
+          </div>
           {isRendering ? (
             <div className="chart-spinner-container">
               <div className="spinner"></div>
             </div>
           ) : (
           <div className="chart-scroll-wrapper">
+          <ZoomableChart chartType="bmi" isPreemie={false}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={bmifaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -2217,7 +2606,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 dataKey="ageYears"
                 type="number"
                 scale="linear"
-                domain={ageDomain}
+                domain={getChartDomain('bmi', false)}
                 tickFormatter={bmifaTickFormatter}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
@@ -2225,11 +2614,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                 padding={{ left: 0, right: 0 }}
               />
               <YAxis 
-                domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], null)}
-                label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }} 
+                domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], 'bmi', false)}
+                label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }}
+                tickFormatter={formatBMITick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="bmi" patientData={patientData} />}
+                content={<OrderedTooltip chartType="bmi" patientData={patientData} useImperial={useImperial} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2240,6 +2630,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
               {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData?.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi)}
             </LineChart>
           </ResponsiveContainer>
+          </ZoomableChart>
           </div>
           )}
         </div>
@@ -2256,13 +2647,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           {/* Arm Circumference-for-Age */}
           {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.armCircumference) && acfaData && acfaData.length > 0 && (
             <div className="chart-container">
-              <h3>Mid-Upper Arm Circumference-for-Age <span className="chart-source">(WHO)</span></h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <h3 style={{ margin: 0 }}>Mid-Upper Arm Circumference-for-Age <span className="chart-source">(WHO)</span></h3>
+                <ZoomControls chartType="acfa" isPreemie={false} />
+              </div>
               {isRendering ? (
                 <div className="chart-spinner-container">
                   <div className="spinner"></div>
                 </div>
               ) : (
               <div className="chart-scroll-wrapper">
+              <ZoomableChart chartType="acfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={acfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -2270,16 +2665,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     dataKey="ageYears"
                     type="number"
                     scale="linear"
-                    domain={ageDomain}
+                    domain={getChartDomain('acfa', false)}
                     tickFormatter={acfaTickFormatter}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
-                    domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], null)}
+                    domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], 'acfa', false)}
                     label={createYAxisLabel('Arm Circumference (cm)')}
+                    tickFormatter={formatHeightTick}
                   />
                   <Tooltip 
-                    content={<OrderedTooltip chartType="ac" patientData={patientData} />}
+                    content={<OrderedTooltip chartType="ac" patientData={patientData} useImperial={useImperial} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
@@ -2290,6 +2686,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData?.measurements, m => m.armCircumference)}
                 </LineChart>
               </ResponsiveContainer>
+              </ZoomableChart>
               </div>
               )}
             </div>
@@ -2298,13 +2695,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           {/* Subscapular Skinfold-for-Age */}
           {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.subscapularSkinfold) && ssfaData && ssfaData.length > 0 && (
             <div className="chart-container">
-              <h3>Subscapular Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <h3 style={{ margin: 0 }}>Subscapular Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
+                <ZoomControls chartType="ssfa" isPreemie={false} />
+              </div>
               {isRendering ? (
                 <div className="chart-spinner-container">
                   <div className="spinner"></div>
                 </div>
               ) : (
               <div className="chart-scroll-wrapper">
+              <ZoomableChart chartType="ssfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={ssfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -2312,16 +2713,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     dataKey="ageYears"
                     type="number"
                     scale="linear"
-                    domain={ageDomain}
+                    domain={getChartDomain('ssfa', false)}
                     tickFormatter={ssfaTickFormatter}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
-                    domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], null)}
+                    domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], 'ssfa', false)}
                     label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
+                    tickFormatter={formatSkinfoldTick}
                   />
                   <Tooltip 
-                    content={<OrderedTooltip chartType="ssf" patientData={patientData} />}
+                    content={<OrderedTooltip chartType="ssf" patientData={patientData} useImperial={useImperial} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
@@ -2332,6 +2734,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData?.measurements, m => m.subscapularSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
+              </ZoomableChart>
               </div>
               )}
             </div>
@@ -2340,13 +2743,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           {/* Triceps Skinfold-for-Age */}
           {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.tricepsSkinfold) && tsfaData && tsfaData.length > 0 && (
             <div className="chart-container">
-              <h3>Triceps Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <h3 style={{ margin: 0 }}>Triceps Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
+                <ZoomControls chartType="tsfa" isPreemie={false} />
+              </div>
               {isRendering ? (
                 <div className="chart-spinner-container">
                   <div className="spinner"></div>
                 </div>
               ) : (
               <div className="chart-scroll-wrapper">
+              <ZoomableChart chartType="tsfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={tsfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -2354,16 +2761,17 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                     dataKey="ageYears"
                     type="number"
                     scale="linear"
-                    domain={ageDomain}
+                    domain={getChartDomain('tsfa', false)}
                     tickFormatter={tsfaTickFormatter}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
-                    domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], null)}
+                    domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], 'tsfa', false)}
                     label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
+                    tickFormatter={formatSkinfoldTick}
                   />
                   <Tooltip 
-                    content={<OrderedTooltip chartType="tsf" patientData={patientData} />}
+                    content={<OrderedTooltip chartType="tsf" patientData={patientData} useImperial={useImperial} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
@@ -2374,6 +2782,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData?.measurements, m => m.tricepsSkinfold)}
                 </LineChart>
               </ResponsiveContainer>
+              </ZoomableChart>
               </div>
               )}
             </div>
@@ -2387,7 +2796,10 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
           <h3 className="section-header">Weight-for-Height</h3>
           
           <div className="chart-container">
-            <h3>Weight-for-Height <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <h3 style={{ margin: 0 }}>Weight-for-Height <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
+              <ZoomControls chartType="wh" isPreemie={false} />
+            </div>
             {isRendering ? (
               <div className="chart-spinner-container">
                 <div className="spinner"></div>
@@ -2402,21 +2814,29 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange 
                   type="number"
                   scale="linear"
                   domain={heightDomain}
-                  label={{ value: 'Height (cm)', position: 'insideBottom', offset: -10 }}
+                  label={{ value: useImperial ? 'Height (cm / in)' : 'Height (cm)', position: 'insideBottom', offset: -10 }}
                   allowDataOverflow={false}
                 />
                 <YAxis
                   domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], null)}
-                  label={{ value: 'Weight (kg)', angle: -90, position: 'insideLeft' }}
+                  label={{ value: useImperial ? 'Weight (kg / lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft' }}
+                  tickFormatter={formatWeightTick}
                 />
                 <Tooltip 
-                  content={<OrderedTooltip chartType="weight" patientData={patientData} />}
+                  content={<OrderedTooltip chartType="weight" patientData={patientData} useImperial={useImperial} />}
                   cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                   allowEscapeViewBox={{ x: true, y: true }}
                   trigger={['hover', 'click']}
                   shared={true}
                   position={{ x: 'auto', y: 'auto' }}
-                  labelFormatter={(value) => `Height: ${value.toFixed(1)} cm`}
+                  labelFormatter={(value) => {
+                    const cm = value.toFixed(1)
+                    if (useImperial) {
+                      const inches = cmToInches(value).toFixed(1)
+                      return `Height: ${cm} cm (${inches} in)`
+                    }
+                    return `Height: ${cm} cm`
+                  }}
                 />
                 {/* Legend removed - labels now appear at end of lines */}
                 {renderWeightForHeightLines(whChartData, patientData?.measurements)}

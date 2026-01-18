@@ -15,6 +15,7 @@ function App() {
     try {
       const parsed = JSON.parse(saved)
       
+      // Handle legacy single-person format
       if (parsed.name || parsed.gender || parsed.birthDate || parsed.measurements) {
         const id = getPersonId(parsed.name, parsed.birthDate)
         const measurements = (parsed.measurements || (parsed.measurement ? [parsed.measurement] : [])).map(m => ({
@@ -22,21 +23,59 @@ function App() {
           id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
         }))
         return {
-          [id]: { id, name: parsed.name || '', gender: parsed.gender || '', birthDate: parsed.birthDate || '', measurements }
+          [id]: { 
+            id, 
+            name: parsed.name || '', 
+            gender: parsed.gender || '', 
+            birthDate: parsed.birthDate || '', 
+            gestationalAgeAtBirth: parsed.gestationalAgeAtBirth || 40,
+            measurements 
+          }
         }
       }
       
+      // Handle v2.0 format (people object)
+      if (parsed.people && typeof parsed.people === 'object') {
+        const migrated = {}
+        Object.keys(parsed.people).forEach(key => {
+          const person = parsed.people[key]
+          const id = person.id || key
+          if (person.measurements) {
+            person.measurements = person.measurements.map(m => ({
+              ...m,
+              id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+            }))
+          }
+          migrated[id] = { 
+            ...person, 
+            id,
+            gestationalAgeAtBirth: person.gestationalAgeAtBirth || 40
+          }
+        })
+        return migrated
+      }
+      
+      // Handle legacy format (people at root level as object)
       const migrated = {}
       Object.keys(parsed).forEach(key => {
+        // Skip metadata fields
+        if (key === 'version' || key === 'sources' || key === 'selectedPersonId') return
+        
         const person = parsed[key]
-        const id = person.id || key
-        if (person.measurements) {
-          person.measurements = person.measurements.map(m => ({
-            ...m,
-            id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
-          }))
+        if (person && (person.name || person.gender || person.birthDate || person.measurements)) {
+          const id = person.id || key
+          if (person.measurements) {
+            person.measurements = person.measurements.map(m => ({
+              ...m,
+              id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+            }))
+          }
+          migrated[id] = { 
+            ...person, 
+            id,
+            gestationalAgeAtBirth: person.gestationalAgeAtBirth || 40
+          }
         }
-        migrated[id] = { ...person, id }
       })
       return migrated
     } catch (e) {
@@ -62,6 +101,11 @@ function App() {
       } catch {}
     }
     return { age: 'who', wfh: 'who' }
+  })
+
+  const [useImperial, setUseImperial] = useState(() => {
+    const saved = localStorage.getItem('growthChartUseImperial')
+    return saved === 'true'
   })
 
   const [toast, setToast] = useState({ show: false, message: '' })
@@ -113,6 +157,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('growthChartSources', JSON.stringify(referenceSources))
   }, [referenceSources])
+
+  useEffect(() => {
+    localStorage.setItem('growthChartUseImperial', useImperial.toString())
+  }, [useImperial])
 
   const handleAddPerson = (name, birthDate, gender, gestationalAgeAtBirth = 40) => {
     // Check if person already exists
@@ -323,14 +371,77 @@ function App() {
   const handleImportData = (data) => {
     let personToSelect = null
     
-    if (data.people) {
+    // Handle different data formats and versions
+    const importVersion = data.version || '1.0'
+    
+    // Migrate legacy formats
+    let migratedData = data
+    
+    // Handle v1.0 or unversioned data (single person at root)
+    if (!data.people && (data.name || data.gender || data.birthDate || data.measurements || data.measurement)) {
+      const id = getPersonId(data.name || '', data.birthDate || '')
+      const measurements = (data.measurements || (data.measurement ? [data.measurement] : [])).map(m => ({
+        ...m,
+        id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+      }))
+      migratedData = {
+        version: '2.0',
+        people: {
+          [id]: {
+            id,
+            name: data.name || '',
+            gender: data.gender || '',
+            birthDate: data.birthDate || '',
+            gestationalAgeAtBirth: data.gestationalAgeAtBirth || 40,
+            measurements
+          }
+        },
+        selectedPersonId: id,
+        sources: data.sources || { age: 'who', wfh: 'who' }
+      }
+    }
+    
+    // Handle v1.x format (people as array or object with different structure)
+    if (importVersion.startsWith('1.') && data.people) {
+      const peopleObj = Array.isArray(data.people) 
+        ? data.people.reduce((acc, person, idx) => {
+            const id = person.id || `person_${idx}`
+            acc[id] = { ...person, id }
+            return acc
+          }, {})
+        : data.people
+      
+      // Ensure all people have IDs and proper structure
+      const normalizedPeople = {}
+      Object.keys(peopleObj).forEach(key => {
+        const person = peopleObj[key]
+        const id = person.id || getPersonId(person.name || '', person.birthDate || '') || key
+        normalizedPeople[id] = {
+          ...person,
+          id,
+          gestationalAgeAtBirth: person.gestationalAgeAtBirth || 40,
+          measurements: (person.measurements || []).map(m => ({
+            ...m,
+            id: m.id || `${m.date}_${Math.random().toString(36).substr(2, 9)}`
+          }))
+        }
+      })
+      
+      migratedData = {
+        ...migratedData,
+        version: '2.0',
+        people: normalizedPeople
+      }
+    }
+    
+    if (migratedData.people) {
       // Merge with existing people
       setPeople(prev => {
         const merged = { ...prev }
         let firstNewPersonId = null
         
         // Import people and ensure they use ID as key
-        Object.values(data.people).forEach(importedPerson => {
+        Object.values(migratedData.people).forEach(importedPerson => {
           const id = importedPerson.id || getPersonId(importedPerson.name, importedPerson.birthDate)
           const existing = merged[id]
           
@@ -398,8 +509,8 @@ function App() {
         })
         
         // Determine which person to select
-        if (data.selectedPersonId && merged[data.selectedPersonId]) {
-          personToSelect = data.selectedPersonId
+        if (migratedData.selectedPersonId && merged[migratedData.selectedPersonId]) {
+          personToSelect = migratedData.selectedPersonId
         } else if (firstNewPersonId) {
           personToSelect = firstNewPersonId
         } else if (Object.keys(merged).length > 0) {
@@ -413,17 +524,25 @@ function App() {
       if (personToSelect) {
         setSelectedPersonId(personToSelect)
       }
+    } else if (migratedData.people && Object.keys(migratedData.people).length > 0) {
+      // Handle case where people exist but weren't processed above
+      const firstPersonId = Object.keys(migratedData.people)[0]
+      if (migratedData.selectedPersonId && migratedData.people[migratedData.selectedPersonId]) {
+        setSelectedPersonId(migratedData.selectedPersonId)
+      } else if (firstPersonId) {
+        setSelectedPersonId(firstPersonId)
+      }
     } else {
       // No people in import, but might have selectedPersonId
-      if (data.selectedPersonId && people[data.selectedPersonId]) {
-        setSelectedPersonId(data.selectedPersonId)
+      if (migratedData.selectedPersonId && people[migratedData.selectedPersonId]) {
+        setSelectedPersonId(migratedData.selectedPersonId)
       }
     }
     
-    if (data.sources) {
-      setReferenceSources(data.sources)
+    if (migratedData.sources) {
+      setReferenceSources(migratedData.sources)
     }
-    setToast({ show: true, message: 'Data imported successfully' })
+    setToast({ show: true, message: `Data imported successfully${importVersion !== '2.0' ? ' (migrated from v' + importVersion + ')' : ''}` })
   }
 
   return (
@@ -456,6 +575,8 @@ function App() {
               onReferenceSourcesChange={handleReferenceSourcesChange}
               onExportData={handleExportData}
               onImportData={handleImportData}
+              useImperial={useImperial}
+              onUseImperialChange={setUseImperial}
             />
           </section>
           
@@ -464,12 +585,14 @@ function App() {
               patientData={patientData} 
               referenceSources={referenceSources}
               onReferenceSourcesChange={handleReferenceSourcesChange}
+              useImperial={useImperial}
             />
             
             {patientData && patientData?.measurements && patientData?.measurements.length > 0 && (
               <BoxWhiskerPlots 
                 patientData={patientData} 
                 referenceSources={referenceSources}
+                useImperial={useImperial}
               />
             )}
           </section>

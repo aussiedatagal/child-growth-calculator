@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import './DataInputForm.css'
+import { formatWeight, formatLength, parseWeightInput, parseLengthInput, kgToPounds, cmToInches, poundsToKg, inchesToCm } from '../utils/unitConversion'
 
 function formatAge(ageYears) {
   if (ageYears < 2) {
@@ -22,7 +23,7 @@ const AGE_SOURCES = [
   { value: 'cdc', label: 'CDC' },
 ]
 
-function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange, onExportData, onImportData }) {
+function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange, onExportData, onImportData, useImperial = false, onUseImperialChange }) {
   const [showAddPersonForm, setShowAddPersonForm] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
   const [newPersonDOB, setNewPersonDOB] = useState('')
@@ -139,14 +140,15 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       return
     }
 
+    // Convert from display units to metric (internal storage)
     const measurement = {
       date: newFormData.date,
       ageYears: age.years,
       ageMonths: age.months,
-      height: newFormData.height ? parseFloat(newFormData.height) : null,
-      weight: newFormData.weight ? parseFloat(newFormData.weight) : null,
-      headCircumference: newFormData.headCircumference ? parseFloat(newFormData.headCircumference) : null,
-      armCircumference: newFormData.armCircumference ? parseFloat(newFormData.armCircumference) : null,
+      height: newFormData.height ? (useImperial ? inchesToCm(parseFloat(newFormData.height)) : parseFloat(newFormData.height)) : null,
+      weight: newFormData.weight ? (useImperial ? poundsToKg(parseFloat(newFormData.weight)) : parseFloat(newFormData.weight)) : null,
+      headCircumference: newFormData.headCircumference ? (useImperial ? inchesToCm(parseFloat(newFormData.headCircumference)) : parseFloat(newFormData.headCircumference)) : null,
+      armCircumference: newFormData.armCircumference ? (useImperial ? inchesToCm(parseFloat(newFormData.armCircumference)) : parseFloat(newFormData.armCircumference)) : null,
       subscapularSkinfold: newFormData.subscapularSkinfold ? parseFloat(newFormData.subscapularSkinfold) : null,
       tricepsSkinfold: newFormData.tricepsSkinfold ? parseFloat(newFormData.tricepsSkinfold) : null
     }
@@ -158,12 +160,13 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
 
   const handleEditMeasurement = (measurement) => {
     setInlineEditingId(measurement.id)
+    // Convert from metric (internal) to display units
     setInlineEditData({
       date: measurement.date,
-      height: measurement.height ? String(measurement.height) : '',
-      weight: measurement.weight ? String(measurement.weight) : '',
-      headCircumference: measurement.headCircumference ? String(measurement.headCircumference) : '',
-      armCircumference: measurement.armCircumference ? String(measurement.armCircumference) : '',
+      height: measurement.height ? String(useImperial ? cmToInches(measurement.height) : measurement.height) : '',
+      weight: measurement.weight ? String(useImperial ? kgToPounds(measurement.weight) : measurement.weight) : '',
+      headCircumference: measurement.headCircumference ? String(useImperial ? cmToInches(measurement.headCircumference) : measurement.headCircumference) : '',
+      armCircumference: measurement.armCircumference ? String(useImperial ? cmToInches(measurement.armCircumference) : measurement.armCircumference) : '',
       subscapularSkinfold: measurement.subscapularSkinfold ? String(measurement.subscapularSkinfold) : '',
       tricepsSkinfold: measurement.tricepsSkinfold ? String(measurement.tricepsSkinfold) : ''
     })
@@ -212,14 +215,15 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       return
     }
 
+    // Convert from display units to metric (internal storage)
     const measurement = {
       date: inlineEditData.date,
       ageYears: age.years,
       ageMonths: age.months,
-      height: inlineEditData.height ? parseFloat(inlineEditData.height) : null,
-      weight: inlineEditData.weight ? parseFloat(inlineEditData.weight) : null,
-      headCircumference: inlineEditData.headCircumference ? parseFloat(inlineEditData.headCircumference) : null,
-      armCircumference: inlineEditData.armCircumference ? parseFloat(inlineEditData.armCircumference) : null,
+      height: inlineEditData.height ? (useImperial ? inchesToCm(parseFloat(inlineEditData.height)) : parseFloat(inlineEditData.height)) : null,
+      weight: inlineEditData.weight ? (useImperial ? poundsToKg(parseFloat(inlineEditData.weight)) : parseFloat(inlineEditData.weight)) : null,
+      headCircumference: inlineEditData.headCircumference ? (useImperial ? inchesToCm(parseFloat(inlineEditData.headCircumference)) : parseFloat(inlineEditData.headCircumference)) : null,
+      armCircumference: inlineEditData.armCircumference ? (useImperial ? inchesToCm(parseFloat(inlineEditData.armCircumference)) : parseFloat(inlineEditData.armCircumference)) : null,
       subscapularSkinfold: inlineEditData.subscapularSkinfold ? parseFloat(inlineEditData.subscapularSkinfold) : null,
       tricepsSkinfold: inlineEditData.tricepsSkinfold ? parseFloat(inlineEditData.tricepsSkinfold) : null
     }
@@ -653,24 +657,37 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <h2 style={{ margin: 0, fontSize: '1.2rem', borderBottom: 'none' }}>Add Measurement</h2>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAddMeasurementForm(false)
-                      setFormData(getInitialFormData())
-                    }}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      background: '#95a5a6',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      fontSize: '0.85rem',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Cancel
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    {onUseImperialChange && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={useImperial}
+                          onChange={(e) => onUseImperialChange(e.target.checked)}
+                          style={{ cursor: 'pointer' }}
+                        />
+                        <span>Imperial Units</span>
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddMeasurementForm(false)
+                        setFormData(getInitialFormData())
+                      }}
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        background: '#95a5a6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
                 
                 <form onSubmit={handleSubmit}>
@@ -701,22 +718,26 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                   )}
 
                   <div className="form-group">
-                    <label htmlFor="weight">Weight (kg)</label>
+                    <label htmlFor="weight">Weight {useImperial ? '(lb)' : '(kg)'}</label>
                     <input
                       type="number"
                       id="weight"
                       name="weight"
                       value={formData.weight}
                       onChange={handleInputChange}
-                      step="0.001"
+                      step={useImperial ? "0.1" : "0.001"}
                       min="0"
-                      placeholder="e.g., 3.250"
+                      placeholder={useImperial ? "e.g., 7.2" : "e.g., 3.250"}
                     />
-                    <small>Enter weight in kilograms. Supports gram precision (e.g., 3.250 kg = 3250 g)</small>
+                    <small>
+                      {useImperial 
+                        ? "Enter weight in pounds (e.g., 7.2 lb = 7 lb 3.2 oz)"
+                        : "Enter weight in kilograms. Supports gram precision (e.g., 3.250 kg = 3250 g)"}
+                    </small>
                   </div>
 
                   <div className="form-group">
-                    <label htmlFor="height">Height (cm)</label>
+                    <label htmlFor="height">Height {useImperial ? '(in)' : '(cm)'}</label>
                     <input
                       type="number"
                       id="height"
@@ -725,12 +746,17 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       onChange={handleInputChange}
                       step="0.1"
                       min="0"
-                      placeholder="e.g., 85.5"
+                      placeholder={useImperial ? "e.g., 33.7" : "e.g., 85.5"}
                     />
+                    <small>
+                      {useImperial 
+                        ? "Enter height in inches (e.g., 33.7 in = 2' 9.7\")"
+                        : "Enter height in centimeters"}
+                    </small>
                   </div>
 
                   <div className="form-group">
-                    <label htmlFor="headCircumference">Head Circumference (cm)</label>
+                    <label htmlFor="headCircumference">Head Circumference {useImperial ? '(in)' : '(cm)'}</label>
                     <input
                       type="number"
                       id="headCircumference"
@@ -739,7 +765,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       onChange={handleInputChange}
                       step="0.1"
                       min="0"
-                      placeholder="e.g., 45.2"
+                      placeholder={useImperial ? "e.g., 17.8" : "e.g., 45.2"}
                     />
                   </div>
 
@@ -767,7 +793,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       {showAdvanced && (
                         <>
                           <div className="form-group">
-                            <label htmlFor="armCircumference">Mid-Upper Arm Circumference (cm)</label>
+                            <label htmlFor="armCircumference">Mid-Upper Arm Circumference {useImperial ? '(in)' : '(cm)'}</label>
                             <input
                               type="number"
                               id="armCircumference"
@@ -947,48 +973,48 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               )}
                             </div>
                             <div>
-                              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Weight (kg)</label>
+                              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Weight {useImperial ? '(lb)' : '(kg)'}</label>
                               {isEditing ? (
                                 <input
                                   type="number"
                                   value={editData.weight}
                                   onChange={(e) => handleInlineEditChange('weight', e.target.value)}
-                                  placeholder="kg"
-                                  step="0.001"
+                                  placeholder={useImperial ? "lb" : "kg"}
+                                  step={useImperial ? "0.1" : "0.001"}
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
-                                <div style={{ padding: '0.5rem', color: '#333' }}>{m.weight ? `${m.weight} kg` : '-'}</div>
+                                <div style={{ padding: '0.5rem', color: '#333' }}>{m.weight ? formatWeight(m.weight, useImperial) : '-'}</div>
                               )}
                             </div>
                             <div>
-                              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Height (cm)</label>
+                              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Height {useImperial ? '(in)' : '(cm)'}</label>
                               {isEditing ? (
                                 <input
                                   type="number"
                                   value={editData.height}
                                   onChange={(e) => handleInlineEditChange('height', e.target.value)}
-                                  placeholder="cm"
+                                  placeholder={useImperial ? "in" : "cm"}
                                   step="0.1"
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
-                                <div style={{ padding: '0.5rem', color: '#333' }}>{m.height ? `${m.height} cm` : '-'}</div>
+                                <div style={{ padding: '0.5rem', color: '#333' }}>{m.height ? formatLength(m.height, useImperial) : '-'}</div>
                               )}
                             </div>
                             <div>
-                              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Head Circumference (cm)</label>
+                              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Head Circumference {useImperial ? '(in)' : '(cm)'}</label>
                               {isEditing ? (
                                 <input
                                   type="number"
                                   value={editData.headCircumference}
                                   onChange={(e) => handleInlineEditChange('headCircumference', e.target.value)}
-                                  placeholder="cm"
+                                  placeholder={useImperial ? "in" : "cm"}
                                   step="0.1"
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
-                                <div style={{ padding: '0.5rem', color: '#333' }}>{m.headCircumference ? `${m.headCircumference} cm` : '-'}</div>
+                                <div style={{ padding: '0.5rem', color: '#333' }}>{m.headCircumference ? formatLength(m.headCircumference, useImperial) : '-'}</div>
                               )}
                             </div>
                           </div>
@@ -1004,13 +1030,13 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                       type="number"
                                       value={editData.armCircumference}
                                       onChange={(e) => handleInlineEditChange('armCircumference', e.target.value)}
-                                      placeholder="cm"
+                                      placeholder={useImperial ? "in" : "cm"}
                                       step="0.1"
                                       style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                     />
                                   ) : (
                                     <span style={{ color: '#666' }}>
-                                      {m.armCircumference ? `${m.armCircumference} cm` : 'Not recorded'}
+                                      {m.armCircumference ? formatLength(m.armCircumference, useImperial) : 'Not recorded'}
                                     </span>
                                   )}
                                 </div>
