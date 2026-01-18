@@ -28,7 +28,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   const [newPersonName, setNewPersonName] = useState('')
   const [newPersonDOB, setNewPersonDOB] = useState('')
   const [newPersonGender, setNewPersonGender] = useState('')
-  const [newPersonGA, setNewPersonGA] = useState('40')
+  const [newPersonGA, setNewPersonGA] = useState('')
+  const [newPersonIsPremature, setNewPersonIsPremature] = useState(false)
   const getInitialFormData = () => {
     return {
       date: new Date().toISOString().split('T')[0],
@@ -61,7 +62,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
     name: '',
     gender: '',
     birthDate: '',
-    gestationalAgeAtBirth: ''
+    gestationalAgeAtBirth: '',
+    isPremature: false
   })
   const debounceTimerRef = useRef(null)
 
@@ -84,18 +86,23 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   // Sync patientInfoFormData with patientData when person is selected
   useEffect(() => {
     if (patientData && selectedPersonId) {
+      const ga = patientData?.gestationalAgeAtBirth
+      const gaNum = ga ? (typeof ga === 'string' ? parseFloat(ga) : ga) : null
+      const isPremature = gaNum !== null && gaNum < 40
       setPatientInfoFormData({
         name: patientData?.name || '',
         gender: patientData?.gender || '',
         birthDate: patientData?.birthDate || '',
-        gestationalAgeAtBirth: patientData?.gestationalAgeAtBirth || ''
+        gestationalAgeAtBirth: ga || '',
+        isPremature: isPremature
       })
     } else if (!selectedPersonId) {
       setPatientInfoFormData({
         name: '',
         gender: '',
         birthDate: '',
-        gestationalAgeAtBirth: ''
+        gestationalAgeAtBirth: '',
+        isPremature: false
       })
     }
   }, [patientData, selectedPersonId])
@@ -259,17 +266,37 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
   }
 
   const handlePatientInfoChange = (e) => {
-    const { name, value } = e.target
-    setPatientInfoFormData(prev => ({
-      ...prev,
-      [name]: value
-    }))
+    const { name, value, type, checked } = e.target
+    if (type === 'checkbox') {
+      setPatientInfoFormData(prev => {
+        const newData = {
+          ...prev,
+          [name]: checked
+        }
+        // If unchecking premature, reset gestational age to 40 (hidden)
+        if (name === 'isPremature' && !checked) {
+          newData.gestationalAgeAtBirth = ''
+        }
+        return newData
+      })
+    } else {
+      setPatientInfoFormData(prev => ({
+        ...prev,
+        [name]: value
+      }))
+    }
   }
 
   const handleSavePatientInfo = () => {
+    // If not premature, ensure gestational age is set to 40 (hidden)
+    const gaToSave = patientInfoFormData.isPremature 
+      ? patientInfoFormData.gestationalAgeAtBirth 
+      : '40'
+    
     onDataUpdate({
       ...patientData,
       ...patientInfoFormData,
+      gestationalAgeAtBirth: gaToSave,
       measurements: patientData?.measurements || []
     })
     setShowPatientInfo(false)
@@ -282,12 +309,13 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       alert('Please fill in name, birth date, and gender')
       return
     }
-    const ga = newPersonGA ? parseFloat(newPersonGA) : 40
+    const ga = newPersonIsPremature && newPersonGA ? parseFloat(newPersonGA) : 40
     onAddPerson(newPersonName.trim(), newPersonDOB, newPersonGender, ga)
     setNewPersonName('')
     setNewPersonDOB('')
     setNewPersonGender('')
-    setNewPersonGA('40')
+    setNewPersonGA('')
+    setNewPersonIsPremature(false)
     setShowAddPersonForm(false)
   }
 
@@ -424,19 +452,38 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
               />
             </div>
             <div className="form-group">
-              <label htmlFor="newPersonGA">Gestational Age at Birth (weeks)</label>
-              <input
-                type="number"
-                id="newPersonGA"
-                value={newPersonGA}
-                onChange={(e) => setNewPersonGA(e.target.value)}
-                min="22"
-                max="45"
-                step="0.1"
-                placeholder="40 (for term infants)"
-              />
-              <small>Enter gestational age in weeks (22-45). Default is 40 weeks for term infants.</small>
+              <label htmlFor="newPersonIsPremature" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: 0 }}>
+                <input
+                  type="checkbox"
+                  id="newPersonIsPremature"
+                  checked={newPersonIsPremature}
+                  onChange={(e) => {
+                    setNewPersonIsPremature(e.target.checked)
+                    if (!e.target.checked) {
+                      setNewPersonGA('')
+                    }
+                  }}
+                  style={{ cursor: 'pointer', width: 'auto', margin: 0 }}
+                />
+                <span style={{ color: '#555', fontWeight: 500, fontSize: '0.95rem' }}>Baby was born prematurely</span>
+              </label>
             </div>
+            {newPersonIsPremature && (
+              <div className="form-group">
+                <label htmlFor="newPersonGA">Gestational Age at Birth (weeks)</label>
+                <input
+                  type="number"
+                  id="newPersonGA"
+                  value={newPersonGA}
+                  onChange={(e) => setNewPersonGA(e.target.value)}
+                  min="22"
+                  max="45"
+                  step="0.1"
+                  placeholder="e.g., 28"
+                />
+                <small>Enter gestational age in weeks (22-45). Required for preemie growth tracking.</small>
+              </div>
+            )}
             <div className="form-group">
               <label htmlFor="newPersonGender">Gender *</label>
               <select
@@ -461,7 +508,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                   setNewPersonName('')
                   setNewPersonDOB('')
                   setNewPersonGender('')
-                  setNewPersonGA('40')
+                  setNewPersonGA('')
+                  setNewPersonIsPremature(false)
                 }}
                 className="submit-btn"
                 style={{
@@ -562,24 +610,39 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                     value={patientInfoFormData.birthDate}
                     onChange={handlePatientInfoChange}
                   />
-                  <small>Or enter age manually below</small>
                 </div>
 
                 <div className="form-group">
-                  <label htmlFor="gestationalAgeAtBirth">Gestational Age at Birth (weeks)</label>
-                  <input
-                    type="number"
-                    id="gestationalAgeAtBirth"
-                    name="gestationalAgeAtBirth"
-                    value={patientInfoFormData.gestationalAgeAtBirth}
-                    onChange={handlePatientInfoChange}
-                    min="22"
-                    max="45"
-                    step="0.1"
-                    placeholder="40 (for term infants)"
-                  />
-                  <small>Enter gestational age in weeks (22-45). Default is 40 weeks for term infants. Required for preemie growth tracking.</small>
+                  <label htmlFor="isPremature" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: 0 }}>
+                    <input
+                      type="checkbox"
+                      id="isPremature"
+                      name="isPremature"
+                      checked={patientInfoFormData.isPremature}
+                      onChange={handlePatientInfoChange}
+                      style={{ cursor: 'pointer', width: 'auto', margin: 0 }}
+                    />
+                    <span style={{ color: '#555', fontWeight: 500, fontSize: '0.95rem' }}>Baby was born prematurely</span>
+                  </label>
                 </div>
+
+                {patientInfoFormData.isPremature && (
+                  <div className="form-group">
+                    <label htmlFor="gestationalAgeAtBirth">Gestational Age at Birth (weeks)</label>
+                    <input
+                      type="number"
+                      id="gestationalAgeAtBirth"
+                      name="gestationalAgeAtBirth"
+                      value={patientInfoFormData.gestationalAgeAtBirth}
+                      onChange={handlePatientInfoChange}
+                      min="22"
+                      max="45"
+                      step="0.1"
+                      placeholder="e.g., 28"
+                    />
+                    <small>Enter gestational age in weeks (22-45). Required for preemie growth tracking.</small>
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
                   <button
@@ -593,11 +656,15 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                   <button
                     type="button"
                     onClick={() => {
+                      const ga = patientData?.gestationalAgeAtBirth
+                      const gaNum = ga ? (typeof ga === 'string' ? parseFloat(ga) : ga) : null
+                      const isPremature = gaNum !== null && gaNum < 40
                       setPatientInfoFormData({
                         name: (patientData && patientData?.name) || '',
                         gender: (patientData && patientData?.gender) || '',
                         birthDate: (patientData && patientData?.birthDate) || '',
-                        gestationalAgeAtBirth: (patientData && patientData?.gestationalAgeAtBirth) || ''
+                        gestationalAgeAtBirth: ga || '',
+                        isPremature: isPremature
                       })
                       setShowPatientInfo(false)
                     }}
