@@ -586,6 +586,7 @@ function App() {
               referenceSources={referenceSources}
               onReferenceSourcesChange={handleReferenceSourcesChange}
               useImperial={useImperial}
+              onUseImperialChange={setUseImperial}
             />
             
             {patientData && patientData?.measurements && patientData?.measurements.length > 0 && (
@@ -593,6 +594,7 @@ function App() {
                 patientData={patientData} 
                 referenceSources={referenceSources}
                 useImperial={useImperial}
+                onUseImperialChange={setUseImperial}
               />
             )}
           </section>

@@ -605,7 +605,7 @@ const generateAgeTicks = (domain) => {
   return ticks.length > 0 ? ticks : undefined
 }
 
-function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false }) {
+function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false, onUseImperialChange }) {
   const [wfaData, setWfaData] = useState(null)
   const [hfaData, setHfaData] = useState(null) // height-for-age (WHO lhfa; CDC lhfa+hfa merge)
   const [hcfaData, setHcfaData] = useState(null)
@@ -2585,31 +2585,110 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   const maxAge = (patientData?.measurements || []).reduce((max, m) => Math.max(max, m.ageYears || 0), 0)
   const ageLabel = maxAge < 2 ? 'Age (Months)' : 'Age (Years)'
 
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+
   return (
     <div className="growth-charts">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-        <h2 style={{ margin: 0 }}>Charts</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <label htmlFor="dataSource" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#555' }}>Data Source:</label>
-          <select
-            id="dataSource"
-            name="dataSource"
-            value={referenceSources?.age || 'who'}
-            onChange={(e) => onReferenceSourcesChange(prev => ({ ...prev, age: e.target.value }))}
-            style={{
-              padding: '0.5rem',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-              fontSize: '0.95rem',
-              background: 'white',
-              cursor: 'pointer'
-            }}
-          >
-            {AGE_SOURCES.map(s => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: isMobile ? '1rem' : '0' }}>
+          <h2 style={{ margin: 0 }}>Charts</h2>
+          {!isMobile && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <label htmlFor="dataSource" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#555' }}>Data Source:</label>
+                <select
+                  id="dataSource"
+                  name="dataSource"
+                  value={referenceSources?.age || 'who'}
+                  onChange={(e) => onReferenceSourcesChange(prev => ({ ...prev, age: e.target.value }))}
+                  style={{
+                    padding: '0.5rem',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    fontSize: '0.95rem',
+                    background: 'white',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {AGE_SOURCES.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+              {onUseImperialChange && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label htmlFor="units" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#555' }}>Units:</label>
+                  <select
+                    id="units"
+                    name="units"
+                    value={useImperial ? 'imperial' : 'metric'}
+                    onChange={(e) => onUseImperialChange(e.target.value === 'imperial')}
+                    style={{
+                      padding: '0.5rem',
+                      border: '1px solid #ccc',
+                      borderRadius: '4px',
+                      fontSize: '0.95rem',
+                      background: 'white',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="metric">Metric</option>
+                    <option value="imperial">Imperial</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+        {isMobile && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <label htmlFor="dataSource" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#555', minWidth: '100px' }}>Data Source:</label>
+              <select
+                id="dataSource"
+                name="dataSource"
+                value={referenceSources?.age || 'who'}
+                onChange={(e) => onReferenceSourcesChange(prev => ({ ...prev, age: e.target.value }))}
+                style={{
+                  padding: '0.5rem',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  fontSize: '0.95rem',
+                  background: 'white',
+                  cursor: 'pointer',
+                  flex: 1
+                }}
+              >
+                {AGE_SOURCES.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            {onUseImperialChange && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <label htmlFor="units-mobile" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#555', minWidth: '100px' }}>Units:</label>
+                <select
+                  id="units-mobile"
+                  name="units-mobile"
+                  value={useImperial ? 'imperial' : 'metric'}
+                  onChange={(e) => onUseImperialChange(e.target.value === 'imperial')}
+                  style={{
+                    padding: '0.5rem',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    fontSize: '0.95rem',
+                    background: 'white',
+                    cursor: 'pointer',
+                    flex: 1
+                  }}
+                >
+                  <option value="metric">Metric</option>
+                  <option value="imperial">Imperial</option>
+                </select>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       
       {/* Age-based Charts Section */}
@@ -2693,7 +2772,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               />
               <YAxis 
                 domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], 'wfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
-                label={{ value: useImperial ? 'Weight (kg / lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft', offset: 10 }}
+                label={{ value: useImperial ? 'Weight (lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft', offset: 10 }}
                 tickFormatter={formatWeightTick}
               />
               <Tooltip 
@@ -2783,7 +2862,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               />
               <YAxis 
                 domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], 'hfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
-                label={{ value: useImperial ? 'Height (cm / in)' : 'Height (cm)', angle: -90, position: 'insideLeft' }}
+                label={{ value: useImperial ? 'Height (in)' : 'Height (cm)', angle: -90, position: 'insideLeft' }}
                 tickFormatter={formatHeightTick}
               />
               <Tooltip 
@@ -3133,12 +3212,12 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                   type="number"
                   scale="linear"
                   domain={heightDomain}
-                  label={{ value: useImperial ? 'Height (cm / in)' : 'Height (cm)', position: 'insideBottom', offset: -10 }}
+                  label={{ value: useImperial ? 'Height (in)' : 'Height (cm)', position: 'insideBottom', offset: -10 }}
                   allowDataOverflow={false}
                 />
                 <YAxis
                   domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], null)}
-                  label={{ value: useImperial ? 'Weight (kg / lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft' }}
+                  label={{ value: useImperial ? 'Weight (lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft' }}
                   tickFormatter={formatWeightTick}
                 />
                 <Tooltip 
