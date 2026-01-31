@@ -773,7 +773,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
                   ? formatWeight(data.patient, true)
                   : useImperial && data.unit === 'cm'
                   ? formatLength(data.patient, true)
-                  : `${data.patient.toFixed(data.unit === 'kg' ? 3 : 1)} ${data.unit}`}
+                  : `${data.patient.toFixed(3)} ${data.unit}`}
               </text>
               <text x="140" y={patientY + 20} textAnchor="end" fontSize="10" fill="#666">({patientPercentile} percentile)</text>
             </svg>

@@ -75,7 +75,7 @@ export const formatLength = (cm, useImperial) => {
     }
     return `${inches.toFixed(1)}"`
   }
-  return `${cm.toFixed(1)} cm`
+  return `${cm.toFixed(3)} cm`
 }
 
 // Parse weight input (handles both metric and imperial)
