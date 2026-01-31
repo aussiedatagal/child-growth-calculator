@@ -724,17 +724,28 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <h2 style={{ margin: 0, fontSize: '1.2rem', borderBottom: 'none' }}>Add Measurement</h2>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                     {onUseImperialChange && (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={useImperial}
-                          onChange={(e) => onUseImperialChange(e.target.checked)}
-                          style={{ cursor: 'pointer' }}
-                        />
-                        <span>Imperial Units</span>
-                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <label htmlFor="units-input" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#555' }}>Units:</label>
+                        <select
+                          id="units-input"
+                          name="units-input"
+                          value={useImperial ? 'imperial' : 'metric'}
+                          onChange={(e) => onUseImperialChange(e.target.value === 'imperial')}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            border: '1px solid #ccc',
+                            borderRadius: '4px',
+                            fontSize: '0.85rem',
+                            background: 'white',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <option value="metric">Metric</option>
+                          <option value="imperial">Imperial</option>
+                        </select>
+                      </div>
                     )}
                     <button
                       type="button"

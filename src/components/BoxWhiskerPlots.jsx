@@ -4,7 +4,7 @@ import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromL
 import { loadReferenceData as loadCachedReferenceData } from '../utils/referenceDataCache'
 import { formatWeight, formatLength } from '../utils/unitConversion'
 
-function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false }) {
+function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false, onUseImperialChange }) {
   const [wfaData, setWfaData] = useState(null)
   const [hfaData, setHfaData] = useState(null)
   const [hcfaData, setHcfaData] = useState(null)
@@ -685,7 +685,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
       <div key={data.label} className="box-plot-item">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <h3 style={{ margin: 0 }}>
-            {data.label} ({useImperial && (data.unit === 'kg' || data.unit === 'cm') ? `${data.unit} / ${data.unit === 'kg' ? 'lb' : 'in'}` : data.unit}) 
+            {data.label} ({useImperial && (data.unit === 'kg' || data.unit === 'cm') ? (data.unit === 'kg' ? 'lb' : 'in') : data.unit}) 
             {data.source && <span className="chart-source">({data.source})</span>}
           </h3>
           {allMeasurements && allMeasurements.length > 1 && (
