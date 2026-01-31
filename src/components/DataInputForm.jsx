@@ -799,7 +799,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                     <small>
                       {useImperial 
                         ? "Enter weight in pounds (e.g., 7.2 lb = 7 lb 3.2 oz)"
-                        : "Enter weight in kilograms. Supports gram precision (e.g., 3.250 kg = 3250 g)"}
+                        : "Enter weight in kilograms"}
                     </small>
                   </div>
 
@@ -811,7 +811,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       name="height"
                       value={formData.height}
                       onChange={handleInputChange}
-                      step="0.1"
+                      step="0.001"
                       min="0"
                       placeholder={useImperial ? "e.g., 33.7" : "e.g., 85.5"}
                     />
@@ -830,7 +830,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       name="headCircumference"
                       value={formData.headCircumference}
                       onChange={handleInputChange}
-                      step="0.1"
+                      step="0.001"
                       min="0"
                       placeholder={useImperial ? "e.g., 17.8" : "e.g., 45.2"}
                     />
@@ -867,7 +867,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               name="armCircumference"
                               value={formData.armCircumference}
                               onChange={handleInputChange}
-                              step="0.1"
+                              step="0.001"
                               min="0"
                               placeholder="e.g., 16.5"
                             />
@@ -881,7 +881,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               name="subscapularSkinfold"
                               value={formData.subscapularSkinfold}
                               onChange={handleInputChange}
-                              step="0.1"
+                              step="0.001"
                               min="0"
                               placeholder="e.g., 8.3"
                             />
@@ -895,7 +895,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               name="tricepsSkinfold"
                               value={formData.tricepsSkinfold}
                               onChange={handleInputChange}
-                              step="0.1"
+                              step="0.001"
                               min="0"
                               placeholder="e.g., 9.1"
                             />
@@ -1062,7 +1062,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                   value={editData.height}
                                   onChange={(e) => handleInlineEditChange('height', e.target.value)}
                                   placeholder={useImperial ? "in" : "cm"}
-                                  step="0.1"
+                                  step="0.001"
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
@@ -1077,7 +1077,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                   value={editData.headCircumference}
                                   onChange={(e) => handleInlineEditChange('headCircumference', e.target.value)}
                                   placeholder={useImperial ? "in" : "cm"}
-                                  step="0.1"
+                                  step="0.001"
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
@@ -1098,7 +1098,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                       value={editData.armCircumference}
                                       onChange={(e) => handleInlineEditChange('armCircumference', e.target.value)}
                                       placeholder={useImperial ? "in" : "cm"}
-                                      step="0.1"
+                                      step="0.001"
                                       style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                     />
                                   ) : (
@@ -1115,7 +1115,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                       value={editData.subscapularSkinfold}
                                       onChange={(e) => handleInlineEditChange('subscapularSkinfold', e.target.value)}
                                       placeholder="mm"
-                                      step="0.1"
+                                      step="0.001"
                                       style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                     />
                                   ) : (
@@ -1132,7 +1132,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                       value={editData.tricepsSkinfold}
                                       onChange={(e) => handleInlineEditChange('tricepsSkinfold', e.target.value)}
                                       placeholder="mm"
-                                      step="0.1"
+                                      step="0.001"
                                       style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                     />
                                   ) : (

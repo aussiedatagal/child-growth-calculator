@@ -111,10 +111,206 @@ const getGestationalAge = (patientData) => {
     : patientData.gestationalAgeAtBirth
 }
 
-const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter, chartType, patientData, useImperial = false }) => {
+const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter, chartType, patientData, useImperial = false, getPatientPercentile, chartData }) => {
   if (!active || !payload || !payload.length) return null
   
-  const sortedPayload = [...payload].sort((a, b) => {
+  // Check if patient entry exists in payload
+  const hasPatientEntry = payload.some(e => {
+    const isPatient = e.color === '#000' || 
+                     (e.dataKey && (e.dataKey === 'patientWeight' || e.dataKey === 'patientHeight' || e.dataKey === 'patientHC'))
+    return isPatient && e.value != null
+  })
+  
+  // If patient entry is not in payload, try to find closest patient point from chart data
+  let patientEntryToAdd = null
+  if (!hasPatientEntry && chartData && chartData.length > 0 && payload.length > 0) {
+    // Get the x position from the first payload entry
+    const firstPayload = payload[0]?.payload
+    const hoverX = firstPayload?.xAxisValue != null ? firstPayload.xAxisValue : 
+                   (firstPayload?.ageYears != null ? firstPayload.ageYears : label)
+    
+    if (typeof hoverX === 'number') {
+      // Find the closest patient point
+      const patientDataKey = chartType === 'weight' ? 'patientWeight' : 
+                            chartType === 'height' ? 'patientHeight' : 
+                            chartType === 'hc' ? 'patientHC' : null
+      
+      if (patientDataKey) {
+        const patientPoints = chartData
+          .map((d, index) => ({ data: d, index, x: d.xAxisValue != null ? d.xAxisValue : d.ageYears, value: d[patientDataKey] }))
+          .filter(p => p.value != null && typeof p.x === 'number')
+        
+        if (patientPoints.length > 0) {
+          const closest = patientPoints.reduce((closest, current) => {
+            if (!closest) return current
+            const closestDiff = Math.abs(closest.x - hoverX)
+            const currentDiff = Math.abs(current.x - hoverX)
+            // Only include if within 2 weeks/units of hover position
+            if (currentDiff <= 2 && currentDiff < closestDiff) return current
+            return closest
+          }, null)
+          
+          if (closest && Math.abs(closest.x - hoverX) <= 2) {
+            // Create a patient entry similar to what Recharts would provide
+            patientEntryToAdd = {
+              value: closest.value,
+              name: 'Patient',
+              color: '#000',
+              dataKey: patientDataKey,
+              payload: closest.data
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Add patient entry to payload if we found one
+  const enhancedPayload = patientEntryToAdd ? [...payload, patientEntryToAdd] : payload
+  
+  // Format number with exactly 3 decimal places for measurements
+  const formatValue = (num) => {
+    if (typeof num !== 'number' || isNaN(num)) return String(num)
+    // Always show 3 decimal places for measurements
+    return num.toFixed(3)
+  }
+  
+  // Process payload to calculate dynamic percentiles for patient points
+  const processedPayload = enhancedPayload.map(entry => {
+    // Patient lines are black (#000) or have patient dataKey (patientWeight, patientHeight, patientHC)
+    const isPatient = entry.color === '#000' || 
+                     (entry.dataKey && (entry.dataKey === 'patientWeight' || entry.dataKey === 'patientHeight' || entry.dataKey === 'patientHC'))
+    
+    if (isPatient && entry.payload) {
+      // Calculate percentile dynamically based on the actual point being hovered
+      if (chartType === 'weight' && entry.payload.height != null) {
+        // Weight-for-height chart: use height instead of age
+        const weight = entry.value
+        const height = entry.payload.height
+        if (weight != null && height != null && typeof getPatientPercentile === 'function') {
+          const dynamicPercentile = getPatientPercentile(weight, height)
+          if (dynamicPercentile) {
+            return { ...entry, name: dynamicPercentile }
+          }
+        }
+      } else {
+        // Age-based charts: check if this is a preemie point with preemie reference data
+        const value = entry.value
+        const payloadData = entry.payload
+        
+        // Check if this is a preemie point (either explicitly marked or has preemie data fields)
+        const isPreemiePoint = payloadData.isPreemie === true || 
+                               (payloadData.weightL != null || payloadData.heightL != null || payloadData.hcL != null) ||
+                               (payloadData.gestationalAge != null && payloadData.gestationalAge < 42)
+        
+        if (value != null && isPreemiePoint) {
+          // For preemie points, calculate percentile from preemie reference data in payload
+          const getPercentileFromLMS = (val, L, M, S, p3, p50, p97) => {
+            // Try LMS method first if all values are available
+            if (typeof L === 'number' && typeof M === 'number' && typeof S === 'number' &&
+                !Number.isNaN(L) && !Number.isNaN(M) && !Number.isNaN(S) && M > 0 && S > 0) {
+              const pct = calculatePercentileFromLMS(val, L, M, S)
+              if (pct !== null && !Number.isNaN(pct)) {
+                if (pct < 0.1) return '< 0.1th'
+                if (pct >= 99.9) return '> 99.9th'
+                return `${pct.toFixed(1)}th`
+              }
+            }
+            
+            // Fall back to linear interpolation using only P3, P50, P97 (preemie data doesn't have P15/P85)
+            if (p3 != null && p50 != null && p97 != null && 
+                typeof p3 === 'number' && typeof p50 === 'number' && typeof p97 === 'number' &&
+                !Number.isNaN(p3) && !Number.isNaN(p50) && !Number.isNaN(p97)) {
+              if (val <= p3) return '< 3rd'
+              if (val <= p50) {
+                // Interpolate from 3rd to 50th percentile
+                const pct = 3 + ((val - p3) / (p50 - p3)) * 47
+                return `${pct.toFixed(1)}th`
+              }
+              if (val <= p97) {
+                // Interpolate from 50th to 97th percentile
+                const pct = 50 + ((val - p50) / (p97 - p50)) * 47
+                return `${pct.toFixed(1)}th`
+              }
+              return '> 97th'
+            }
+            return null
+          }
+          
+          let percentile = null
+          if (chartType === 'weight') {
+            // Try LMS first, then fall back to range interpolation
+            if (payloadData.weightL != null && payloadData.weightM != null && payloadData.weightS != null) {
+              percentile = getPercentileFromLMS(value, payloadData.weightL, payloadData.weightM, payloadData.weightS,
+                payloadData.weightP3, payloadData.weightP50, payloadData.weightP97)
+            }
+            // If LMS didn't work, try range interpolation
+            if (!percentile && payloadData.weightP3 != null && payloadData.weightP50 != null && payloadData.weightP97 != null) {
+              percentile = getPercentileFromLMS(value, null, null, null,
+                payloadData.weightP3, payloadData.weightP50, payloadData.weightP97)
+            }
+          } else if (chartType === 'height') {
+            if (payloadData.heightL != null && payloadData.heightM != null && payloadData.heightS != null) {
+              percentile = getPercentileFromLMS(value, payloadData.heightL, payloadData.heightM, payloadData.heightS,
+                payloadData.heightP3, payloadData.heightP50, payloadData.heightP97)
+            }
+            if (!percentile && payloadData.heightP3 != null && payloadData.heightP50 != null && payloadData.heightP97 != null) {
+              percentile = getPercentileFromLMS(value, null, null, null,
+                payloadData.heightP3, payloadData.heightP50, payloadData.heightP97)
+            }
+          } else if (chartType === 'hc') {
+            if (payloadData.hcL != null && payloadData.hcM != null && payloadData.hcS != null) {
+              percentile = getPercentileFromLMS(value, payloadData.hcL, payloadData.hcM, payloadData.hcS,
+                payloadData.hcP3, payloadData.hcP50, payloadData.hcP97)
+            }
+            if (!percentile && payloadData.hcP3 != null && payloadData.hcP50 != null && payloadData.hcP97 != null) {
+              percentile = getPercentileFromLMS(value, null, null, null,
+                payloadData.hcP3, payloadData.hcP50, payloadData.hcP97)
+            }
+          }
+          
+          if (percentile) {
+            return { ...entry, name: percentile }
+          }
+          // If percentile calculation failed for preemie point, try standard method as fallback
+          // This handles cases where preemie data might be incomplete
+          if (getPatientPercentile) {
+            const patientAge = payloadData.patientAgeYears
+            const ageYears = patientAge != null ? patientAge : payloadData.ageYears
+            if (ageYears != null && value != null) {
+              const dynamicPercentile = getPatientPercentile(value, ageYears, chartType)
+              if (dynamicPercentile) {
+                return { ...entry, name: dynamicPercentile }
+              }
+            }
+          }
+          // If all percentile calculations failed, still show the patient entry
+          if (!entry.name || entry.name === 'Patient') {
+            return { ...entry, name: 'Patient' }
+          }
+        }
+        
+        // For non-preemie points, use the standard percentile calculation
+        if (getPatientPercentile) {
+          const patientAge = payloadData.patientAgeYears
+          const ageYears = patientAge != null ? patientAge : payloadData.ageYears
+          if (ageYears != null && value != null) {
+            const dynamicPercentile = getPatientPercentile(value, ageYears, chartType)
+            if (dynamicPercentile) {
+              return { ...entry, name: dynamicPercentile }
+            }
+          }
+        }
+        // Ensure patient entries always have a name
+        if (isPatient && (!entry.name || entry.name === 'Patient')) {
+          return { ...entry, name: 'Patient' }
+        }
+      }
+    }
+    return entry
+  })
+  
+  const sortedPayload = [...processedPayload].sort((a, b) => {
     const aName = a.name || ''
     const bName = b.name || ''
     
@@ -216,26 +412,30 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
           // Patient lines are black (#000)
           const isPatient = entry.color === '#000'
           
+          // Skip entries with null/undefined values unless it's a patient entry
+          // Patient entries should always be shown even if value is null (might be at different x position)
+          if (value == null && !isPatient) {
+            return null
+          }
+          
           // Format value with unit
           let displayValue = value
-          if (typeof value === 'number' && unit && !name.toLowerCase().includes(unit.toLowerCase())) {
+          if (value == null) {
+            displayValue = 'N/A'
+          } else if (typeof value === 'number' && unit && !name.toLowerCase().includes(unit.toLowerCase())) {
             if (useImperial && (chartType === 'weight' || chartType === 'height' || chartType === 'hc' || chartType === 'ac')) {
               // Show both metric and imperial
               if (chartType === 'weight') {
-                const kg = value.toFixed(2)
+                const kg = formatValue(value)
                 const lb = kgToPounds(value).toFixed(1)
                 displayValue = `${kg} kg (${lb} lb)`
               } else {
-                const cm = value.toFixed(1)
+                const cm = formatValue(value)
                 const inches = cmToInches(value).toFixed(1)
                 displayValue = `${cm} cm (${inches} in)`
               }
             } else {
-              if (chartType === 'weight' || chartType === 'bmi') {
-                displayValue = `${value.toFixed(2)} ${unit}`
-              } else {
-                displayValue = `${value.toFixed(1)} ${unit}`
-              }
+              displayValue = `${formatValue(value)} ${unit}`
             }
           }
           
@@ -297,6 +497,112 @@ const createAgeTickFormatter = () => {
     lastTickValue = tickValue
     return label
   }
+}
+
+const createDynamicAgeTickFormatter = (domain) => {
+  if (!domain || domain.length !== 2) {
+    return createAgeTickFormatter()
+  }
+  
+  const [min, max] = domain
+  const range = max - min
+  const rangeInMonths = range * 12
+  
+  // If range is less than 3 months, use weeks for better granularity
+  // This prevents duplicate "1m" labels when zoomed in
+  const useWeeks = rangeInMonths < 3
+  
+  let lastLabel = null
+  let lastTickValue = null
+  
+  return (tickItem) => {
+    const tickValue = parseFloat(tickItem)
+    let label
+    
+    if (useWeeks && tickValue < 2) {
+      // For zoomed views showing less than 3 months, display in weeks
+      const weeks = Math.round(tickValue * 52.1775)
+      label = `${weeks}w`
+    } else {
+      label = formatAgeLabel(tickValue)
+    }
+    
+    // Reset if we're going backwards (new chart render starting from beginning)
+    if (lastTickValue != null && tickValue < lastTickValue) {
+      lastLabel = null
+    }
+    
+    if (label === lastLabel) {
+      lastTickValue = tickValue
+      return '' // Return empty string to hide duplicate
+    }
+    
+    lastLabel = label
+    lastTickValue = tickValue
+    return label
+  }
+}
+
+// Generate appropriate tick values based on domain and zoom level
+const generateAgeTicks = (domain) => {
+  if (!domain || domain.length !== 2) {
+    return undefined // Let Recharts auto-generate
+  }
+  
+  const [min, max] = domain
+  const range = max - min
+  const rangeInMonths = range * 12
+  const ticks = []
+  
+  // If range is less than 3 months, use weekly ticks
+  if (rangeInMonths < 3) {
+    const minWeeks = Math.ceil(min * 52.1775)
+    const maxWeeks = Math.floor(max * 52.1775)
+    // Show every week, but limit to reasonable number of ticks (max 20)
+    const step = Math.max(1, Math.ceil((maxWeeks - minWeeks) / 20))
+    for (let weeks = minWeeks; weeks <= maxWeeks; weeks += step) {
+      ticks.push(weeks / 52.1775) // Convert back to years
+    }
+  } 
+  // If range is less than 12 months, use monthly ticks
+  else if (rangeInMonths < 12) {
+    const minMonths = Math.ceil(min * 12)
+    const maxMonths = Math.floor(max * 12)
+    // Show every month, but limit to reasonable number of ticks (max 20)
+    const step = Math.max(1, Math.ceil((maxMonths - minMonths) / 20))
+    for (let months = minMonths; months <= maxMonths; months += step) {
+      ticks.push(months / 12) // Convert to years
+    }
+  }
+  // If range is less than 2 years, use quarterly ticks
+  else if (range < 2) {
+    const minMonths = Math.ceil(min * 12)
+    const maxMonths = Math.floor(max * 12)
+    // Show every 3 months
+    for (let months = minMonths; months <= maxMonths; months += 3) {
+      ticks.push(months / 12)
+    }
+  }
+  // For larger ranges, use yearly ticks
+  else {
+    const minYear = Math.ceil(min)
+    const maxYear = Math.floor(max)
+    // Show every year, but limit to reasonable number
+    const step = Math.max(1, Math.ceil((maxYear - minYear) / 15))
+    for (let year = minYear; year <= maxYear; year += step) {
+      ticks.push(year)
+    }
+  }
+  
+  // Ensure we have at least min and max
+  if (ticks.length === 0 || ticks[0] > min) {
+    ticks.unshift(min)
+  }
+  if (ticks[ticks.length - 1] < max) {
+    ticks.push(max)
+  }
+  
+  return ticks.length > 0 ? ticks : undefined
 }
 
 function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false }) {
@@ -842,6 +1148,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
             Math.abs(chartData[closestIndex].ageYears - patientAge) <= Math.abs(chartData[closestIndex].ageYears - (chartData[closestIndex]._patientAge || Infinity))) {
           chartData[closestIndex][valueKey] = patientPoint[valueKey]
           chartData[closestIndex]._patientAge = patientAge // Store original patient age for comparison
+          // Store patient age for percentile calculation (keep even after cleanup)
+          chartData[closestIndex].patientAgeYears = patientAge
         }
       }
     })
@@ -974,6 +1282,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 ageYears: ga / 52.1775,
                 isPreemie: true,
                 gestationalAge: ga,
+                patientAgeYears: correctedAge.correctedAgeYears, // Store patient's actual corrected age for percentile calculation
                 [valueKey]: patientValue
               }
               chartData.push(point)
@@ -986,6 +1295,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 ageYears: ga / 52.1775,
                 isPreemie: true,
                 gestationalAge: ga,
+                patientAgeYears: correctedAge.correctedAgeYears, // Store patient's actual corrected age for percentile calculation
                 [valueKey]: patientValue
               }
               chartData.push(point)
@@ -999,6 +1309,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               ageYears: ga / 52.1775,
               isPreemie: true,
               gestationalAge: ga,
+              patientAgeYears: correctedAge.correctedAgeYears, // Store patient's actual corrected age for percentile calculation
               [valueKey]: patientValue
             }
             chartData.push(point)
@@ -1034,6 +1345,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               ageYears: ageToUse,
               isPreemie: false,
               correctedAge: ageToUse,
+              patientAgeYears: ageToUse, // Store patient's actual age for percentile calculation
               [valueKey]: patientValue
             }
             chartData.push(point)
@@ -2341,7 +2653,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 tickFormatter={(value) => {
                   // If we have preemie data, format as weeks for values <= 42 weeks, otherwise as adjusted age
                   const gaAtBirth = getGestationalAge(patientData)
-    if (gaAtBirth < 40) {
+                  const domain = getChartDomain('wfa', gaAtBirth < 40)
+                  if (gaAtBirth < 40) {
                     if (value <= 42) {
                       return `${Math.round(value)}w`
                     } else {
@@ -2352,7 +2665,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                       return formatAgeLabel(adjustedAgeYears)
                     }
                   }
-                  return wfaTickFormatter(value)
+                  return createDynamicAgeTickFormatter(domain)(value)
                 }}
                 ticks={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 
                   // For preemie charts: show ticks starting from GA at birth, every 2 weeks up to 42, then every 0.1 years up to 2 years
@@ -2373,7 +2686,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                       ticks.push(42 + ((y - correctedAgeAt42Weeks) * 52.1775))
                     }
                     return ticks
-                  })() : undefined
+                  })() : generateAgeTicks(getChartDomain('wfa', false))
                 }
                 label={{ value: patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
@@ -2384,7 +2697,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 tickFormatter={formatWeightTick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="weight" patientData={patientData} useImperial={useImperial} />}
+                content={<OrderedTooltip chartType="weight" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} chartData={wfaChartData} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2436,7 +2749,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 allowDataOverflow={false}
                 tickFormatter={(value) => {
                   const gaAtBirth = getGestationalAge(patientData)
-    if (gaAtBirth < 40) {
+                  const domain = getChartDomain('hfa', gaAtBirth < 40)
+                  if (gaAtBirth < 40) {
                     if (value <= 42) {
                       return `${Math.round(value)}w`
                     } else {
@@ -2445,7 +2759,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                       return formatAgeLabel(adjustedAgeYears)
                     }
                   }
-                  return hfaTickFormatter(value)
+                  return createDynamicAgeTickFormatter(domain)(value)
                 }}
                 ticks={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 
                   (() => {
@@ -2473,7 +2787,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 tickFormatter={formatHeightTick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="height" patientData={patientData} useImperial={useImperial} />}
+                content={<OrderedTooltip chartType="height" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} chartData={hfaChartData} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2525,7 +2839,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 allowDataOverflow={false}
                 tickFormatter={(value) => {
                   const gaAtBirth = getGestationalAge(patientData)
-    if (gaAtBirth < 40) {
+                  const domain = getChartDomain('hcfa', gaAtBirth < 40)
+                  if (gaAtBirth < 40) {
                     if (value <= 42) {
                       return `${Math.round(value)}w`
                     } else {
@@ -2534,7 +2849,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                       return formatAgeLabel(adjustedAgeYears)
                     }
                   }
-                  return hcfaTickFormatter(value)
+                  return createDynamicAgeTickFormatter(domain)(value)
                 }}
                 ticks={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 
                   (() => {
@@ -2551,7 +2866,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                       ticks.push(42 + ((y - correctedAgeAt42Weeks) * 52.1775))
                     }
                     return ticks
-                  })() : undefined
+                  })() : generateAgeTicks(getChartDomain('hcfa', false))
                 }
                 label={{ value: patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
@@ -2563,7 +2878,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 tickFormatter={formatHeightTick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="hc" patientData={patientData} useImperial={useImperial} />}
+                content={<OrderedTooltip chartType="hc" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} chartData={hcfaChartData} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2607,7 +2922,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 type="number"
                 scale="linear"
                 domain={getChartDomain('bmi', false)}
-                tickFormatter={bmifaTickFormatter}
+                tickFormatter={createDynamicAgeTickFormatter(getChartDomain('bmi', false))}
+                ticks={generateAgeTicks(getChartDomain('bmi', false))}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
                 allowDataOverflow={false}
@@ -2619,7 +2935,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 tickFormatter={formatBMITick}
               />
               <Tooltip 
-                content={<OrderedTooltip chartType="bmi" patientData={patientData} useImperial={useImperial} />}
+                content={<OrderedTooltip chartType="bmi" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
@@ -2666,7 +2982,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     type="number"
                     scale="linear"
                     domain={getChartDomain('acfa', false)}
-                    tickFormatter={acfaTickFormatter}
+                    tickFormatter={createDynamicAgeTickFormatter(getChartDomain('acfa', false))}
+                    ticks={generateAgeTicks(getChartDomain('acfa', false))}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
@@ -2675,7 +2992,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     tickFormatter={formatHeightTick}
                   />
                   <Tooltip 
-                    content={<OrderedTooltip chartType="ac" patientData={patientData} useImperial={useImperial} />}
+                    content={<OrderedTooltip chartType="acfa" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
@@ -2714,7 +3031,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     type="number"
                     scale="linear"
                     domain={getChartDomain('ssfa', false)}
-                    tickFormatter={ssfaTickFormatter}
+                    tickFormatter={createDynamicAgeTickFormatter(getChartDomain('ssfa', false))}
+                    ticks={generateAgeTicks(getChartDomain('ssfa', false))}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
@@ -2723,7 +3041,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     tickFormatter={formatSkinfoldTick}
                   />
                   <Tooltip 
-                    content={<OrderedTooltip chartType="ssf" patientData={patientData} useImperial={useImperial} />}
+                    content={<OrderedTooltip chartType="ssfa" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
@@ -2762,7 +3080,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     type="number"
                     scale="linear"
                     domain={getChartDomain('tsfa', false)}
-                    tickFormatter={tsfaTickFormatter}
+                    tickFormatter={createDynamicAgeTickFormatter(getChartDomain('tsfa', false))}
+                    ticks={generateAgeTicks(getChartDomain('tsfa', false))}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
                   <YAxis 
@@ -2771,7 +3090,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     tickFormatter={formatSkinfoldTick}
                   />
                   <Tooltip 
-                    content={<OrderedTooltip chartType="tsf" patientData={patientData} useImperial={useImperial} />}
+                    content={<OrderedTooltip chartType="tsfa" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
@@ -2823,14 +3142,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                   tickFormatter={formatWeightTick}
                 />
                 <Tooltip 
-                  content={<OrderedTooltip chartType="weight" patientData={patientData} useImperial={useImperial} />}
+                  content={<OrderedTooltip chartType="weight" patientData={patientData} useImperial={useImperial} getPatientPercentile={getWeightForHeightPercentile} />}
                   cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                   allowEscapeViewBox={{ x: true, y: true }}
                   trigger={['hover', 'click']}
                   shared={true}
                   position={{ x: 'auto', y: 'auto' }}
                   labelFormatter={(value) => {
-                    const cm = value.toFixed(1)
+                    const cm = value.toFixed(3)
                     if (useImperial) {
                       const inches = cmToInches(value).toFixed(1)
                       return `Height: ${cm} cm (${inches} in)`
