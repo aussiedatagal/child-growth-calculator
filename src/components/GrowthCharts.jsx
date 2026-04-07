@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LabelList, ReferenceLine, Tooltip } from 'recharts'
 import './GrowthCharts.css'
-import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, formatAgeLabel, calculateBMI } from '../utils/chartUtils'
+import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, formatAgeLabel, calculateBMI, nullReferenceCurveFields } from '../utils/chartUtils'
 import { calculateCorrectedAge } from '../utils/personUtils'
 import { loadReferenceData as loadCachedReferenceData } from '../utils/referenceDataCache'
 import { formatWeight, formatLength, kgToPounds, cmToInches, poundsToKg, inchesToCm } from '../utils/unitConversion'
@@ -102,6 +102,8 @@ const createYAxisLabel = (labelText) => {
     )
   }
 }
+
+export const shouldStartDragZoom = (event) => event?.altKey === true
 
 // Helper to ensure gestationalAgeAtBirth is always a number
 const getGestationalAge = (patientData) => {
@@ -643,6 +645,16 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
     endY: null,
     chartType: null
   })
+  // Pinch zoom state
+  const [pinchZoom, setPinchZoom] = useState({
+    active: false,
+    touches: [],
+    initialDistance: null,
+    initialCenterX: null,
+    chartType: null
+  })
+  const [chartScrollState, setChartScrollState] = useState({})
+  const chartScrollRefs = useRef({})
   
   useEffect(() => {
     loadReferenceData()
@@ -1096,65 +1108,36 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       }))
     }
     
-    const chartData = data.map(ref => ({
+    const referenceRows = data.map(ref => ({
       ageYears: ref.ageYears,
       ageLabel: formatAgeLabel(ref.ageYears),
       ...ref,
       [valueKey]: null
     }))
-    
-    const patientPoints = []
+    const chartData = [...referenceRows]
+
     measurements.forEach(measurement => {
       const patientAge = measurement.ageYears
       const patientValue = getValue(measurement)
-      
       if (patientValue == null || patientAge == null) return
       
-      const closestRef = chartData.reduce((closest, item) => {
+      const closestRef = referenceRows.reduce((closest, item) => {
         if (!closest) return item
         const closestDiff = Math.abs(closest.ageYears - patientAge)
         const currentDiff = Math.abs(item.ageYears - patientAge)
         return currentDiff < closestDiff ? item : closest
       }, null)
       
-      if (closestRef) {
-        patientPoints.push({
-          ...closestRef,
-          ageYears: patientAge,
-          ageLabel: formatAgeLabel(patientAge),
-          [valueKey]: patientValue
-        })
-      }
-    })
-    
-    patientPoints.forEach(patientPoint => {
-      const patientAge = patientPoint.ageYears
-      let closestIndex = -1
-      let closestDiff = Infinity
-      
-      chartData.forEach((item, index) => {
-        const diff = Math.abs(item.ageYears - patientAge)
-        if (diff < closestDiff) {
-          closestDiff = diff
-          closestIndex = index
-        }
+      if (!closestRef) return
+
+      chartData.push({
+        ...nullReferenceCurveFields(closestRef),
+        ageYears: patientAge,
+        ageLabel: formatAgeLabel(patientAge),
+        patientAgeYears: patientAge,
+        [valueKey]: patientValue
       })
-      
-      if (closestIndex >= 0) {
-        // Update the closest reference point with patient value
-        // Keep the reference point's age to avoid x-axis duplicates
-        // If multiple patient points map to same reference, use the latest one
-        if (chartData[closestIndex][valueKey] == null || 
-            Math.abs(chartData[closestIndex].ageYears - patientAge) <= Math.abs(chartData[closestIndex].ageYears - (chartData[closestIndex]._patientAge || Infinity))) {
-          chartData[closestIndex][valueKey] = patientPoint[valueKey]
-          chartData[closestIndex]._patientAge = patientAge // Store original patient age for comparison
-          // Store patient age for percentile calculation (keep even after cleanup)
-          chartData[closestIndex].patientAgeYears = patientAge
-        }
-      }
     })
-    
-    chartData.forEach(item => delete item._patientAge)
     chartData.sort((a, b) => a.ageYears - b.ageYears)
     return chartData
   }, [])
@@ -1583,6 +1566,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
 
     const minAge = 0
     const maxAge = Math.max(...ages)
+    const paddingYears = 0.5
+    const maxAgeLimit = 20
 
     let finalMax
     if (maxAge < 2) {
@@ -1593,7 +1578,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       finalMax = Math.ceil(maxAge - 0.01)
     }
 
-    return [minAge, Math.max(finalMax, 0.5)]
+    const paddedMax = Math.min(finalMax + paddingYears, maxAgeLimit)
+    return [minAge, Math.max(paddedMax, 0.5)]
   }, [])
 
   const calculateHeightDomain = useCallback((measurements) => {
@@ -1678,6 +1664,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   
   const basePreemieDomain = useMemo(() => {
     const gaAtBirth = getGestationalAge(patientData)
+    const paddingWeeks = 26
+    const maxAgeLimitYears = 20
     
     if (!patientData?.gestationalAgeAtBirth || gaAtBirth >= 40) {
       return null // Not a preemie
@@ -1720,7 +1708,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       }
     }
     
-    return [minWeeks, maxWeeks]
+    const maxWeeksLimit = 42 + (maxAgeLimitYears * 52.1775)
+    return [minWeeks, Math.min(maxWeeks + paddingWeeks, maxWeeksLimit)]
   }, [patientData?.gestationalAgeAtBirth, patientData?.birthDate, patientData?.measurements])
   
   // Get effective domain (zoom or base) - must be defined after base domains
@@ -1734,6 +1723,88 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   const getChartDomain = useCallback((chartType, isPreemie) => {
     return getEffectiveDomain(chartType, isPreemie) || (isPreemie ? basePreemieDomain : baseAgeDomain)
   }, [getEffectiveDomain, basePreemieDomain, baseAgeDomain])
+
+  const updateChartScrollState = useCallback(() => {
+    const refs = chartScrollRefs.current
+    const entries = Object.entries(refs)
+    if (entries.length === 0) return
+    setChartScrollState(prev => {
+      let changed = false
+      const nextState = { ...prev }
+      entries.forEach(([chartType, node]) => {
+        if (!node) return
+        const next = {
+          scrollLeft: node.scrollLeft,
+          clientWidth: node.clientWidth,
+          scrollWidth: node.scrollWidth
+        }
+        const current = prev[chartType]
+        if (!current ||
+            current.scrollLeft !== next.scrollLeft ||
+            current.clientWidth !== next.clientWidth ||
+            current.scrollWidth !== next.scrollWidth) {
+          nextState[chartType] = next
+          changed = true
+        }
+      })
+      return changed ? nextState : prev
+    })
+  }, [])
+
+
+  const handleChartScroll = useCallback((chartType, event) => {
+    const target = event.currentTarget
+    if (!target) return
+    setChartScrollState(prev => {
+      const next = {
+        scrollLeft: target.scrollLeft,
+        clientWidth: target.clientWidth,
+        scrollWidth: target.scrollWidth
+      }
+      const current = prev[chartType]
+      if (current &&
+          current.scrollLeft === next.scrollLeft &&
+          current.clientWidth === next.clientWidth &&
+          current.scrollWidth === next.scrollWidth) {
+        return prev
+      }
+      return { ...prev, [chartType]: next }
+    })
+  }, [])
+  
+  // Prevent page scroll when Ctrl/Cmd is held on scroll wrapper
+  const handleScrollWrapperWheel = useCallback((e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+  }, [])
+
+  const setChartScrollRef = useCallback((chartType) => (node) => {
+    if (!node) return
+    chartScrollRefs.current[chartType] = node
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        updateChartScrollState()
+      })
+      return
+    }
+    updateChartScrollState()
+  }, [updateChartScrollState])
+
+  const getScrollableChartWidth = useCallback((chartType, isPreemie) => {
+    const baseDomain = isPreemie ? basePreemieDomain : baseAgeDomain
+    if (!baseDomain) return '100%'
+    const range = baseDomain[1] - baseDomain[0]
+    if (typeof range !== 'number' || Number.isNaN(range) || range <= 0) return '100%'
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+    const baseWidth = isMobile ? 600 : 900
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : baseWidth
+    const minimumOverflowWidth = Math.round(viewportWidth * 1.25)
+    const pixelsPerUnit = isPreemie ? 6 : 220
+    const width = Math.round(range * pixelsPerUnit)
+    return Math.max(baseWidth, width, minimumOverflowWidth)
+  }, [basePreemieDomain, baseAgeDomain])
   
   // Zoom functions
   const zoomIn = useCallback((chartType, isPreemie) => {
@@ -1829,6 +1900,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   // Handle drag zoom
   const handleMouseDown = useCallback((e, chartType, isPreemie) => {
     if (e.button !== 0) return // Only left mouse button
+    if (!shouldStartDragZoom(e)) return
     const rect = e.currentTarget.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
@@ -1907,9 +1979,209 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
     }
   }, [dragZoom.active])
   
+  // Shared zoom logic for both wheel and pinch
+  const applyZoom = useCallback((chartType, isPreemie, centerX, zoomFactor, containerWidth = null) => {
+    const currentDomain = getChartDomain(chartType, isPreemie)
+    if (!currentDomain) return
+    
+    const baseDomain = isPreemie ? basePreemieDomain : baseAgeDomain
+    if (!baseDomain) return
+    
+    const [baseMin, baseMax] = baseDomain
+    const [min, max] = currentDomain
+    const range = max - min
+    
+    const margins = getChartMargins()
+    // Use provided container width or fallback to window width
+    const chartWidth = containerWidth || (typeof window !== 'undefined' ? window.innerWidth : 900)
+    const plotWidth = chartWidth - margins.left - margins.right
+    
+    if (plotWidth <= 0) return
+    
+    // Convert center position to data domain value
+    const centerRatio = Math.max(0, Math.min(1, (centerX - margins.left) / plotWidth))
+    const centerDataValue = min + (centerRatio * range)
+    
+    // Calculate new range
+    const newRange = range * zoomFactor
+    
+    // Ensure minimum range to prevent zooming too far
+    const minRange = (baseMax - baseMin) * 0.01
+    if (newRange < minRange) return
+    
+    // Calculate new domain centered on the center point
+    const newMin = centerDataValue - (centerRatio * newRange)
+    const newMax = centerDataValue + ((1 - centerRatio) * newRange)
+    
+    // Clamp to base domain boundaries
+    let clampedMin = Math.max(baseMin, newMin)
+    let clampedMax = Math.min(baseMax, newMax)
+    
+    // If clamped, adjust to maintain range
+    if (clampedMin === baseMin && clampedMax < baseMax) {
+      clampedMax = Math.min(baseMax, clampedMin + newRange)
+    } else if (clampedMax === baseMax && clampedMin > baseMin) {
+      clampedMin = Math.max(baseMin, clampedMax - newRange)
+    }
+    
+    // If we've zoomed out to or beyond the base domain, reset zoom
+    const tolerance = (baseMax - baseMin) * 0.001
+    if (clampedMin <= baseMin + tolerance && clampedMax >= baseMax - tolerance) {
+      setZoomDomains(prev => {
+        const updated = { ...prev }
+        delete updated[chartType]
+        return updated
+      })
+    } else {
+      setZoomDomains(prev => ({
+        ...prev,
+        [chartType]: [clampedMin, clampedMax]
+      }))
+    }
+  }, [getChartDomain, basePreemieDomain, baseAgeDomain, getChartMargins])
+  
+  // Handle wheel zoom (requires Ctrl/Cmd to avoid interfering with scrolling)
+  const handleWheel = useCallback((e, chartType, isPreemie) => {
+    // Only zoom when Ctrl (Windows/Linux) or Cmd (Mac) is held
+    const isZoomModifier = e.ctrlKey || e.metaKey
+    if (!isZoomModifier) return
+    
+    // Always prevent default when modifier is held to prevent browser zoom and page scroll
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // Don't zoom if dragging or pinching
+    if (dragZoom.active || pinchZoom.active) return
+    
+    const rect = e.currentTarget.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    
+    const margins = getChartMargins()
+    const chartWidth = rect.width
+    const plotWidth = chartWidth - margins.left - margins.right
+    
+    // Only zoom if mouse is over the plot area
+    if (plotWidth <= 0 || mouseX < margins.left || mouseX > chartWidth - margins.right) {
+      return
+    }
+    
+    // Determine zoom direction and factor
+    const zoomFactor = e.deltaY > 0 ? 1.15 : 1 / 1.15
+    
+    applyZoom(chartType, isPreemie, mouseX, zoomFactor, chartWidth)
+  }, [dragZoom.active, pinchZoom.active, applyZoom, getChartMargins])
+  
+  // Calculate distance between two touch points
+  const getTouchDistance = useCallback((touch1, touch2) => {
+    const dx = touch2.clientX - touch1.clientX
+    const dy = touch2.clientY - touch1.clientY
+    return Math.sqrt(dx * dx + dy * dy)
+  }, [])
+  
+  // Calculate center X between two touch points
+  const getTouchCenterX = useCallback((touch1, touch2, rect) => {
+    const centerClientX = (touch1.clientX + touch2.clientX) / 2
+    return centerClientX - rect.left
+  }, [])
+  
+  // Handle touch start for pinch zoom
+  const handleTouchStart = useCallback((e, chartType) => {
+    if (e.touches.length === 2) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const touch1 = e.touches[0]
+      const touch2 = e.touches[1]
+      const distance = getTouchDistance(touch1, touch2)
+      const centerX = getTouchCenterX(touch1, touch2, rect)
+      
+      setPinchZoom({
+        active: true,
+        touches: [touch1, touch2],
+        initialDistance: distance,
+        initialCenterX: centerX,
+        chartType
+      })
+      e.preventDefault()
+    }
+  }, [getTouchDistance, getTouchCenterX])
+  
+  // Handle touch end for pinch zoom
+  const handleTouchEnd = useCallback(() => {
+    setPinchZoom(prev => {
+      if (prev.active) {
+        return {
+          active: false,
+          touches: [],
+          initialDistance: null,
+          initialCenterX: null,
+          chartType: null
+        }
+      }
+      return prev
+    })
+  }, [])
+  
+  // Handle touch move for pinch zoom
+  const handleTouchMove = useCallback((e, isPreemie) => {
+    if (!pinchZoom.active || e.touches.length !== 2) {
+      if (pinchZoom.active && e.touches.length !== 2) {
+        handleTouchEnd()
+      }
+      return
+    }
+    
+    e.preventDefault()
+    
+    const touch1 = e.touches[0]
+    const touch2 = e.touches[1]
+    const currentDistance = getTouchDistance(touch1, touch2)
+    
+    if (pinchZoom.initialDistance && pinchZoom.initialDistance > 0) {
+      const zoomFactor = currentDistance / pinchZoom.initialDistance
+      
+      // Get container width for accurate calculations
+      const container = e.currentTarget
+      const rect = container.getBoundingClientRect()
+      const containerWidth = rect.width
+      
+      // Update center position based on current touch positions
+      const currentCenterX = getTouchCenterX(touch1, touch2, rect)
+      
+      // Only apply zoom if the change is significant (at least 2% change)
+      if (Math.abs(zoomFactor - 1) > 0.02) {
+        applyZoom(pinchZoom.chartType, isPreemie, currentCenterX, zoomFactor, containerWidth)
+        
+        // Update initial distance and center for smooth continuous zooming
+        setPinchZoom(prev => ({
+          ...prev,
+          initialDistance: currentDistance,
+          initialCenterX: currentCenterX
+        }))
+      }
+    }
+  }, [pinchZoom, getTouchDistance, getTouchCenterX, applyZoom, handleTouchEnd])
+  
   // Zoomable chart wrapper
   const ZoomableChart = ({ children, chartType, isPreemie }) => {
     const containerRef = useRef(null)
+    
+    // Use native event listener in capture phase to catch wheel events early
+    useEffect(() => {
+      const container = containerRef.current
+      if (!container) return
+      
+      const wheelHandler = (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+        }
+      }
+      
+      container.addEventListener('wheel', wheelHandler, { passive: false, capture: true })
+      
+      return () => {
+        container.removeEventListener('wheel', wheelHandler, { capture: true })
+      }
+    }, [])
     
     const selectionStyle = dragZoom.active && dragZoom.chartType === chartType ? {
       position: 'absolute',
@@ -1926,11 +2198,15 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
     return (
       <div
         ref={containerRef}
-        style={{ position: 'relative', cursor: dragZoom.active && dragZoom.chartType === chartType ? 'crosshair' : 'default' }}
+        style={{ position: 'relative', cursor: dragZoom.active && dragZoom.chartType === chartType ? 'crosshair' : 'default', touchAction: 'pan-y pinch-zoom' }}
         onMouseDown={(e) => handleMouseDown(e, chartType, isPreemie)}
         onMouseMove={handleMouseMove}
         onMouseUp={(e) => handleMouseUp(e, isPreemie)}
         onMouseLeave={handleMouseLeave}
+        onWheel={(e) => handleWheel(e, chartType, isPreemie)}
+        onTouchStart={(e) => handleTouchStart(e, chartType)}
+        onTouchMove={(e) => handleTouchMove(e, isPreemie)}
+        onTouchEnd={handleTouchEnd}
       >
         {children}
         {selectionStyle && <div style={selectionStyle} />}
@@ -1993,26 +2269,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   
   const filterDataByAge = useCallback((data, chartType) => {
     if (!data) return []
-    const isPreemie = patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40
-    const domain = getChartDomain(chartType, isPreemie)
-    if (!domain) return data
-    
-    // For preemie charts using xAxisValue (weeks), filter by xAxisValue instead of ageYears
-    if (isPreemie) {
-      return data.filter(item => {
-        const xValue = item.xAxisValue != null ? item.xAxisValue : item.ageYears
-        return xValue != null && 
-               xValue >= domain[0] && 
-               xValue <= domain[1]
-      })
-    }
-    // For term charts, filter by ageYears
-    return data.filter(item => 
-      item.ageYears != null && 
-      item.ageYears >= domain[0] && 
-      item.ageYears <= domain[1]
-    )
-  }, [getChartDomain, patientData?.gestationalAgeAtBirth])
+    return data
+  }, [])
 
   const calculateYDomain = useCallback((chartData, valueKeys, chartType, isPreemie) => {
     if (!chartData || chartData.length === 0) return ['auto', 'auto']
@@ -2252,7 +2510,18 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   const tsfaChartDataFiltered = useMemo(() => filterDataByAge(tsfaChartDataRaw, 'tsfa'), [filterDataByAge, tsfaChartDataRaw])
   const tsfaChartData = tsfaChartDataFiltered
 
-  const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, chartData, measurements, getValue) => {
+  useEffect(() => {
+    updateChartScrollState()
+  }, [updateChartScrollState, wfaChartData, hfaChartData, hcfaChartData, bmifaChartData, acfaChartData, ssfaChartData, tsfaChartData, zoomDomains, isRendering])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handleResize = () => updateChartScrollState()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [updateChartScrollState])
+
+  const renderPercentileLines = useCallback((type, dataKeyPrefix, patientDataKey, chartData, measurements, getValue, chartType) => {
     const measurementsWithValue = measurements && measurements.length > 0
       ? measurements.filter(m => {
           const value = getValue(m)
@@ -2273,15 +2542,48 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
     const lastAge = lastMeasurement?.ageYears
     const patientPercentile = lastValue && lastAge ? getPatientPercentile(lastValue, lastAge, type) : null
     const patientNumeric = getNumericPercentile(patientPercentile)
+    const scrollState = chartScrollState[chartType]
     
     
     const dataLength = chartData?.length || 0
     const lastIndex = dataLength > 0 ? dataLength - 1 : -1
+    const isPreemie = patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40
+    const domain = chartType ? getChartDomain(chartType, isPreemie) : null
+    const margins = getChartMargins()
+    const getVisibleMaxX = () => {
+      if (!domain || !scrollState) return null
+      const { scrollLeft = 0, clientWidth = 0, scrollWidth = 0 } = scrollState
+      const plotWidth = scrollWidth - margins.left - margins.right
+      if (!clientWidth || !scrollWidth || plotWidth <= 0) return null
+      const visibleRight = Math.min(scrollLeft + clientWidth, scrollWidth)
+      const ratio = (visibleRight - margins.left) / plotWidth
+      const clamped = Math.max(0, Math.min(1, ratio))
+      return domain[0] + clamped * (domain[1] - domain[0])
+    }
+    const lastVisibleIndex = (() => {
+      if (!chartData || chartData.length === 0) return lastIndex
+      const visibleMaxX = getVisibleMaxX()
+      if (visibleMaxX == null) return lastIndex
+      let closestIndex = -1
+      let closestDiff = Infinity
+      chartData.forEach((item, index) => {
+        const xValue = isPreemie ? (item.xAxisValue != null ? item.xAxisValue : item.ageYears) : item.ageYears
+        if (xValue == null) return
+        const diff = Math.abs(xValue - visibleMaxX)
+        if (diff < closestDiff) {
+          closestDiff = diff
+          closestIndex = index
+        }
+      })
+      return closestIndex >= 0 ? closestIndex : lastIndex
+    })()
     
-    const createEndLabel = (lineName, lineColor, isPatient = false) => {
-      return ({ x, y, value, index, viewBox }) => {
-        if (value == null || value === undefined || index !== lastIndex || !viewBox) return null
-        const labelX = viewBox.x + viewBox.width + 5
+    const createEndLabel = (lineName, lineColor, isPatient = false, targetIndex = lastVisibleIndex) => {
+      return ({ x, y, value, index }) => {
+        if (value == null || value === undefined || index !== targetIndex) return null
+        const labelX = scrollState
+          ? scrollState.scrollLeft + scrollState.clientWidth - margins.right - 6
+          : x + 6
         return (
           <text
             x={labelX}
@@ -2290,6 +2592,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
             fontSize="11px"
             fontWeight={isPatient ? 'bold' : 'normal'}
             dominantBaseline="middle"
+            textAnchor={scrollState ? 'end' : 'start'}
             style={{ pointerEvents: 'none', userSelect: 'none' }}
           >
             {lineName}
@@ -2403,7 +2706,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
     }
     
     return renderAllPercentiles(insertAt)
-  }, [getPatientPercentile, getNumericPercentile])
+  }, [chartScrollState, getChartDomain, getChartMargins, getPatientPercentile, getNumericPercentile])
 
   const renderWeightForHeightLines = useCallback((chartData, measurements) => {
     const measurementsWithBoth = measurements && measurements.length > 0
@@ -2714,7 +3017,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               <div className="spinner"></div>
             </div>
           ) : (
-          <div className="chart-scroll-wrapper">
+          <div className="chart-scroll-wrapper" ref={setChartScrollRef('wfa')} onScroll={(e) => handleChartScroll('wfa', e)} onWheel={handleScrollWrapperWheel}>
+          <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('wfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40) }}>
           <ZoomableChart chartType="wfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart 
@@ -2728,7 +3032,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 type="number"
                 scale="linear"
                 domain={getChartDomain('wfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
-                allowDataOverflow={false}
+                allowDataOverflow={true}
                 tickFormatter={(value) => {
                   // If we have preemie data, format as weeks for values <= 42 weeks, otherwise as adjusted age
                   const gaAtBirth = getGestationalAge(patientData)
@@ -2784,10 +3088,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData?.measurements, m => m.weight)}
+              {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData?.measurements, m => m.weight, 'wfa')}
             </LineChart>
           </ResponsiveContainer>
           </ZoomableChart>
+          </div>
           </div>
           )}
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
@@ -2815,7 +3120,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               <div className="spinner"></div>
             </div>
           ) : (
-          <div className="chart-scroll-wrapper">
+          <div className="chart-scroll-wrapper" ref={setChartScrollRef('hfa')} onScroll={(e) => handleChartScroll('hfa', e)} onWheel={handleScrollWrapperWheel}>
+          <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('hfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40) }}>
           <ZoomableChart chartType="hfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={hfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
@@ -2825,7 +3131,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 type="number"
                 scale="linear"
                 domain={getChartDomain('hfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
-                allowDataOverflow={false}
+                allowDataOverflow={true}
                 tickFormatter={(value) => {
                   const gaAtBirth = getGestationalAge(patientData)
                   const domain = getChartDomain('hfa', gaAtBirth < 40)
@@ -2874,10 +3180,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData?.measurements, m => m.height)}
+              {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData?.measurements, m => m.height, 'hfa')}
             </LineChart>
           </ResponsiveContainer>
           </ZoomableChart>
+          </div>
           </div>
           )}
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
@@ -2905,7 +3212,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               <div className="spinner"></div>
             </div>
           ) : (
-          <div className="chart-scroll-wrapper">
+          <div className="chart-scroll-wrapper" ref={setChartScrollRef('hcfa')} onScroll={(e) => handleChartScroll('hcfa', e)} onWheel={handleScrollWrapperWheel}>
+          <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('hcfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40) }}>
           <ZoomableChart chartType="hcfa" isPreemie={patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={hcfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
@@ -2915,7 +3223,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 type="number"
                 scale="linear"
                 domain={getChartDomain('hcfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
-                allowDataOverflow={false}
+                allowDataOverflow={true}
                 tickFormatter={(value) => {
                   const gaAtBirth = getGestationalAge(patientData)
                   const domain = getChartDomain('hcfa', gaAtBirth < 40)
@@ -2949,7 +3257,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 }
                 label={{ value: patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
-                allowDataOverflow={false}
               />
               <YAxis 
                 domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], 'hcfa', patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40)}
@@ -2965,10 +3272,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData?.measurements, m => m.headCircumference)}
+              {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData?.measurements, m => m.headCircumference, 'hcfa')}
             </LineChart>
           </ResponsiveContainer>
           </ZoomableChart>
+          </div>
           </div>
           )}
           {patientData?.gestationalAgeAtBirth && patientData.gestationalAgeAtBirth < 40 && (
@@ -2991,7 +3299,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
               <div className="spinner"></div>
             </div>
           ) : (
-          <div className="chart-scroll-wrapper">
+          <div className="chart-scroll-wrapper" ref={setChartScrollRef('bmi')} onScroll={(e) => handleChartScroll('bmi', e)} onWheel={handleScrollWrapperWheel}>
+          <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('bmi', false) }}>
           <ZoomableChart chartType="bmi" isPreemie={false}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
             <LineChart data={bmifaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
@@ -3005,7 +3314,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 ticks={generateAgeTicks(getChartDomain('bmi', false))}
                 label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
-                allowDataOverflow={false}
+                allowDataOverflow={true}
                 padding={{ left: 0, right: 0 }}
               />
               <YAxis 
@@ -3022,10 +3331,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 position={{ x: 'auto', y: 'auto' }}
               />
               {/* Legend removed - labels now appear at end of lines */}
-              {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData?.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi)}
+              {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData?.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi, 'bmi')}
             </LineChart>
           </ResponsiveContainer>
           </ZoomableChart>
+          </div>
           </div>
           )}
         </div>
@@ -3051,7 +3361,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                   <div className="spinner"></div>
                 </div>
               ) : (
-              <div className="chart-scroll-wrapper">
+              <div className="chart-scroll-wrapper" ref={setChartScrollRef('acfa')} onScroll={(e) => handleChartScroll('acfa', e)} onWheel={handleScrollWrapperWheel}>
+              <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('acfa', false) }}>
               <ZoomableChart chartType="acfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={acfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
@@ -3079,10 +3390,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     position={{ x: 'auto', y: 'auto' }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
-                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData?.measurements, m => m.armCircumference)}
+                  {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData?.measurements, m => m.armCircumference, 'acfa')}
                 </LineChart>
               </ResponsiveContainer>
               </ZoomableChart>
+              </div>
               </div>
               )}
             </div>
@@ -3100,7 +3412,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                   <div className="spinner"></div>
                 </div>
               ) : (
-              <div className="chart-scroll-wrapper">
+              <div className="chart-scroll-wrapper" ref={setChartScrollRef('ssfa')} onScroll={(e) => handleChartScroll('ssfa', e)} onWheel={handleScrollWrapperWheel}>
+              <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('ssfa', false) }}>
               <ZoomableChart chartType="ssfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={ssfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
@@ -3128,10 +3441,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     position={{ x: 'auto', y: 'auto' }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
-                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData?.measurements, m => m.subscapularSkinfold)}
+                  {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData?.measurements, m => m.subscapularSkinfold, 'ssfa')}
                 </LineChart>
               </ResponsiveContainer>
               </ZoomableChart>
+              </div>
               </div>
               )}
             </div>
@@ -3149,7 +3463,8 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                   <div className="spinner"></div>
                 </div>
               ) : (
-              <div className="chart-scroll-wrapper">
+              <div className="chart-scroll-wrapper" ref={setChartScrollRef('tsfa')} onScroll={(e) => handleChartScroll('tsfa', e)} onWheel={handleScrollWrapperWheel}>
+              <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('tsfa', false) }}>
               <ZoomableChart chartType="tsfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
                 <LineChart data={tsfaChartData || []} margin={getChartMargins()} isAnimationActive={false}>
@@ -3177,10 +3492,11 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     position={{ x: 'auto', y: 'auto' }}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
-                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData?.measurements, m => m.tricepsSkinfold)}
+                  {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData?.measurements, m => m.tricepsSkinfold, 'tsfa')}
                 </LineChart>
               </ResponsiveContainer>
               </ZoomableChart>
+              </div>
               </div>
               )}
             </div>
@@ -3213,7 +3529,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                   scale="linear"
                   domain={heightDomain}
                   label={{ value: useImperial ? 'Height (in)' : 'Height (cm)', position: 'insideBottom', offset: -10 }}
-                  allowDataOverflow={false}
+                  allowDataOverflow={true}
                 />
                 <YAxis
                   domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], null)}

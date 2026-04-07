@@ -83,10 +83,17 @@
 
 .chart-scroll-wrapper {
   width: 100%;
-  overflow: visible !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
   padding-bottom: 10px;
   max-width: 100%;
   box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.chart-scroll-inner {
+  min-width: 120%;
 }
 
 @media (max-width: 767px) {
@@ -96,7 +103,7 @@
   }
   
   .chart-container .recharts-responsive-container {
-    min-width: 100%; /* Use full width on mobile */
+    min-width: 120%; /* Use full width on mobile */
     width: 100% !important;
   }
 }
@@ -214,7 +221,7 @@
   }
 
   .source-group {
-    min-width: 100%;
+    min-width: 120%;
   }
 }
 
@@ -241,11 +248,10 @@
     max-width: 90vw !important;
   }
 }
-.chart-container,
-.chart-scroll-wrapper,
 .recharts-wrapper,
 .recharts-responsive-container {
   overflow: visible !important;
+}.chart-container {
+  overflow: hidden;
+  max-width: 100%;
 }
-
-

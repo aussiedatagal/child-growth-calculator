@@ -74,6 +74,17 @@ export const calculateBMI = (weight, height) => {
   return weight / (heightM * heightM)
 }
 
+const REFERENCE_CURVE_KEY =
+  /^(weight|height|hc|bmi|acfa|ssfa|tsfa)(P\d+|[LMS])$/
+
+export const nullReferenceCurveFields = (row) => {
+  const out = { ...row }
+  for (const key of Object.keys(out)) {
+    if (REFERENCE_CURVE_KEY.test(key)) out[key] = null
+  }
+  return out
+}
+
 
 
 
