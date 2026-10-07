@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import './BoxWhiskerPlots.css'
-import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, calculateBMI } from '../utils/chartUtils'
+import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, calculateBMI, findClosestRow } from '../utils/chartUtils'
 import { loadReferenceData as loadCachedReferenceData } from '../utils/referenceDataCache'
 import { formatWeight, formatLength } from '../utils/unitConversion'
+import { getReferenceAgeYears } from '../utils/personUtils'
 
 function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false, onUseImperialChange }) {
   const [wfaData, setWfaData] = useState(null)
@@ -221,12 +222,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     if (!lastMeasurement || !lastMeasurement.height) return null
     
     const patientHeight = lastMeasurement.height
-    const closest = weightHeightData.reduce((closest, item) => {
-      if (!closest) return item
-      const closestDiff = Math.abs(closest.height - patientHeight)
-      const currentDiff = Math.abs(item.height - patientHeight)
-      return currentDiff < closestDiff ? item : closest
-    }, null)
+    const closest = findClosestRow(weightHeightData, patientHeight, 'height', 1)
     
     return closest
   }
@@ -243,13 +239,13 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
 
   const getClosestRefByAge = (data, measurement) => {
     if (!data || !measurement) return null
-    const patientAge = measurement.ageYears
-    return data.reduce((closest, item) => {
-      if (!closest) return item
-      const closestDiff = Math.abs(closest.ageYears - patientAge)
-      const currentDiff = Math.abs(item.ageYears - patientAge)
-      return currentDiff < closestDiff ? item : closest
-    }, null)
+    const patientAge = getReferenceAgeYears(
+      patientData.birthDate,
+      measurement.date,
+      patientData.gestationalAgeAtBirth,
+      measurement.ageYears
+    )
+    return findClosestRow(data, patientAge)
   }
 
   // Helper function to get the latest measurement for a specific field
@@ -363,12 +359,7 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
     .filter(m => m.weight != null && m.weight > 0 && m.height != null && m.height > 0)
     .map(m => {
       const patientHeight = m.height
-      const closest = weightHeightData?.reduce((closest, item) => {
-        if (!closest) return item
-        const closestDiff = Math.abs(closest.height - patientHeight)
-        const currentDiff = Math.abs(item.height - patientHeight)
-        return currentDiff < closestDiff ? item : closest
-      }, null)
+      const closest = findClosestRow(weightHeightData, patientHeight, 'height', 1)
       
       if (!closest) return null
       
@@ -769,11 +760,11 @@ function BoxWhiskerPlots({ patientData, referenceSources, onReferenceSourcesChan
               <text x="260" y={yPos(data.min) + 4} fontSize="10" fill="#666">3rd: {data.min.toFixed(1)}</text>
 
               <text x="140" y={patientY + 5} textAnchor="end" fontSize="12" fill="#000" fontWeight="bold">
-                Patient: {useImperial && data.unit === 'kg' 
+                {useImperial && data.unit === 'kg' 
                   ? formatWeight(data.patient, true)
-                  : useImperial && data.unit === 'cm'
-                  ? formatLength(data.patient, true)
-                  : `${data.patient.toFixed(3)} ${data.unit}`}
+                  : data.unit === 'cm'
+                  ? formatLength(data.patient, useImperial)
+                  : `${data.patient.toFixed(data.unit === 'kg' ? 3 : 1)} ${data.unit}`}
               </text>
               <text x="140" y={patientY + 20} textAnchor="end" fontSize="10" fill="#666">({patientPercentile} percentile)</text>
             </svg>

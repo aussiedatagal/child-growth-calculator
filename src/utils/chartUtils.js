@@ -88,3 +88,22 @@ export const nullReferenceCurveFields = (row) => {
 
 
 
+
+// Nearest reference row to `value`, or null when `value` falls outside the
+// reference range (by more than `tolerance`). Without this a 3-year-old
+// would be compared against the last row of a 0-2 year table.
+export const findClosestRow = (rows, value, key = 'ageYears', tolerance = 1 / 12) => {
+  if (!rows || rows.length === 0 || value == null || Number.isNaN(value)) return null
+  let closest = null
+  let min = Infinity
+  let max = -Infinity
+  for (const row of rows) {
+    const x = row[key]
+    if (typeof x !== 'number') continue
+    if (x < min) min = x
+    if (x > max) max = x
+    if (!closest || Math.abs(x - value) < Math.abs(closest[key] - value)) closest = row
+  }
+  if (value < min - tolerance || value > max + tolerance) return null
+  return closest
+}
