@@ -75,7 +75,26 @@ export const formatLength = (cm, useImperial) => {
     }
     return `${inches.toFixed(1)}"`
   }
-  return `${cm.toFixed(3)} cm`
+  return `${parseFloat(cm.toFixed(2))} cm`
+}
+
+// Parse a weight entered as pounds plus optional ounces
+export const parseImperialWeight = (pounds, ounces) => {
+  const lb = pounds === '' || pounds == null ? 0 : parseFloat(pounds)
+  const oz = ounces === '' || ounces == null ? 0 : parseFloat(ounces)
+  if (Number.isNaN(lb) || Number.isNaN(oz) || lb + oz <= 0) return null
+  return poundsAndOuncesToKg(lb, oz)
+}
+
+// Split a weight in kg into whole pounds and ounces (to 0.1 oz) for editing
+export const splitImperialWeight = (kg) => {
+  if (kg == null || kg === '') return { pounds: '', ounces: '' }
+  let { pounds, ounces } = kgToPoundsAndOunces(kg)
+  if (ounces >= 16) {
+    pounds += 1
+    ounces = 0
+  }
+  return { pounds: String(pounds), ounces: String(ounces) }
 }
 
 // Parse weight input (handles both metric and imperial)

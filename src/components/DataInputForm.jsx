@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import './DataInputForm.css'
-import { formatWeight, formatLength, parseWeightInput, parseLengthInput, kgToPounds, cmToInches, poundsToKg, inchesToCm } from '../utils/unitConversion'
+import { formatWeight, formatLength, parseWeightInput, parseLengthInput, cmToInches, inchesToCm, parseImperialWeight, splitImperialWeight } from '../utils/unitConversion'
+import { isPretermBirth, PRETERM_CUTOFF_WEEKS } from '../utils/personUtils'
 
 function formatAge(ageYears) {
   if (ageYears < 2) {
@@ -23,6 +24,16 @@ const AGE_SOURCES = [
   { value: 'cdc', label: 'CDC' },
 ]
 
+function TermBirthNote({ ga }) {
+  const weeks = parseFloat(ga)
+  if (Number.isNaN(weeks) || isPretermBirth(weeks)) return null
+  return (
+    <small className="term-birth-note">
+      Born at {PRETERM_CUTOFF_WEEKS} weeks or later counts as term, so measurements are plotted by actual age.
+    </small>
+  )
+}
+
 function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdate, onAddPerson, onSelectPerson, onDeletePerson, onAddMeasurement, onUpdateMeasurement, onDeleteMeasurement, onClearData, referenceSources, onReferenceSourcesChange, onExportData, onImportData, useImperial = false, onUseImperialChange }) {
   const [showAddPersonForm, setShowAddPersonForm] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
@@ -35,6 +46,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       date: new Date().toISOString().split('T')[0],
       height: '',
       weight: '',
+      weightOz: '',
       headCircumference: '',
       armCircumference: '',
       subscapularSkinfold: '',
@@ -136,6 +148,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
     const hasData = !!(
       (newFormData.height && parseFloat(newFormData.height) > 0) ||
       (newFormData.weight && parseFloat(newFormData.weight) > 0) ||
+      (useImperial && newFormData.weightOz && parseFloat(newFormData.weightOz) > 0) ||
       (newFormData.headCircumference && parseFloat(newFormData.headCircumference) > 0) ||
       (newFormData.armCircumference && parseFloat(newFormData.armCircumference) > 0) ||
       (newFormData.subscapularSkinfold && parseFloat(newFormData.subscapularSkinfold) > 0) ||
@@ -153,7 +166,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       ageYears: age.years,
       ageMonths: age.months,
       height: newFormData.height ? (useImperial ? inchesToCm(parseFloat(newFormData.height)) : parseFloat(newFormData.height)) : null,
-      weight: newFormData.weight ? (useImperial ? poundsToKg(parseFloat(newFormData.weight)) : parseFloat(newFormData.weight)) : null,
+      weight: useImperial ? parseImperialWeight(newFormData.weight, newFormData.weightOz) : (newFormData.weight ? parseFloat(newFormData.weight) : null),
       headCircumference: newFormData.headCircumference ? (useImperial ? inchesToCm(parseFloat(newFormData.headCircumference)) : parseFloat(newFormData.headCircumference)) : null,
       armCircumference: newFormData.armCircumference ? (useImperial ? inchesToCm(parseFloat(newFormData.armCircumference)) : parseFloat(newFormData.armCircumference)) : null,
       subscapularSkinfold: newFormData.subscapularSkinfold ? parseFloat(newFormData.subscapularSkinfold) : null,
@@ -170,10 +183,11 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
     // Convert from metric (internal) to display units
     setInlineEditData({
       date: measurement.date,
-      height: measurement.height ? String(useImperial ? cmToInches(measurement.height) : measurement.height) : '',
-      weight: measurement.weight ? String(useImperial ? kgToPounds(measurement.weight) : measurement.weight) : '',
-      headCircumference: measurement.headCircumference ? String(useImperial ? cmToInches(measurement.headCircumference) : measurement.headCircumference) : '',
-      armCircumference: measurement.armCircumference ? String(useImperial ? cmToInches(measurement.armCircumference) : measurement.armCircumference) : '',
+      height: measurement.height ? String(useImperial ? parseFloat(cmToInches(measurement.height).toFixed(2)) : measurement.height) : '',
+      weight: measurement.weight ? (useImperial ? splitImperialWeight(measurement.weight).pounds : String(measurement.weight)) : '',
+      weightOz: measurement.weight && useImperial ? splitImperialWeight(measurement.weight).ounces : '',
+      headCircumference: measurement.headCircumference ? String(useImperial ? parseFloat(cmToInches(measurement.headCircumference).toFixed(2)) : measurement.headCircumference) : '',
+      armCircumference: measurement.armCircumference ? String(useImperial ? parseFloat(cmToInches(measurement.armCircumference).toFixed(2)) : measurement.armCircumference) : '',
       subscapularSkinfold: measurement.subscapularSkinfold ? String(measurement.subscapularSkinfold) : '',
       tricepsSkinfold: measurement.tricepsSkinfold ? String(measurement.tricepsSkinfold) : ''
     })
@@ -211,6 +225,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
     const hasData = !!(
       (inlineEditData.height && parseFloat(inlineEditData.height) > 0) ||
       (inlineEditData.weight && parseFloat(inlineEditData.weight) > 0) ||
+      (useImperial && inlineEditData.weightOz && parseFloat(inlineEditData.weightOz) > 0) ||
       (inlineEditData.headCircumference && parseFloat(inlineEditData.headCircumference) > 0) ||
       (inlineEditData.armCircumference && parseFloat(inlineEditData.armCircumference) > 0) ||
       (inlineEditData.subscapularSkinfold && parseFloat(inlineEditData.subscapularSkinfold) > 0) ||
@@ -228,7 +243,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       ageYears: age.years,
       ageMonths: age.months,
       height: inlineEditData.height ? (useImperial ? inchesToCm(parseFloat(inlineEditData.height)) : parseFloat(inlineEditData.height)) : null,
-      weight: inlineEditData.weight ? (useImperial ? poundsToKg(parseFloat(inlineEditData.weight)) : parseFloat(inlineEditData.weight)) : null,
+      weight: useImperial ? parseImperialWeight(inlineEditData.weight, inlineEditData.weightOz) : (inlineEditData.weight ? parseFloat(inlineEditData.weight) : null),
       headCircumference: inlineEditData.headCircumference ? (useImperial ? inchesToCm(parseFloat(inlineEditData.headCircumference)) : parseFloat(inlineEditData.headCircumference)) : null,
       armCircumference: inlineEditData.armCircumference ? (useImperial ? inchesToCm(parseFloat(inlineEditData.armCircumference)) : parseFloat(inlineEditData.armCircumference)) : null,
       subscapularSkinfold: inlineEditData.subscapularSkinfold ? parseFloat(inlineEditData.subscapularSkinfold) : null,
@@ -335,8 +350,8 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
         try {
           const data = JSON.parse(event.target.result)
           onImportData(data)
-        } catch (error) {
-          alert('Error importing data: ' + error.message)
+        } catch {
+          alert("That file couldn't be read. Choose a file saved with Download Data (growth-charts-data-....json).")
         }
       }
       reader.readAsText(file)
@@ -352,7 +367,6 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
       <input
         type="file"
         ref={fileInputRef}
-        accept=".json"
         style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
         onChange={handleImportData}
       />
@@ -478,10 +492,11 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                   onChange={(e) => setNewPersonGA(e.target.value)}
                   min="22"
                   max="45"
-                  step="0.1"
+                  step="any"
                   placeholder="e.g., 28"
                 />
                 <small>Enter gestational age in weeks (22-45). Required for preemie growth tracking.</small>
+                <TermBirthNote ga={newPersonGA} />
               </div>
             )}
             <div className="form-group">
@@ -637,10 +652,11 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       onChange={handlePatientInfoChange}
                       min="22"
                       max="45"
-                      step="0.1"
+                      step="any"
                       placeholder="e.g., 28"
                     />
                     <small>Enter gestational age in weeks (22-45). Required for preemie growth tracking.</small>
+                    <TermBirthNote ga={patientInfoFormData.gestationalAgeAtBirth} />
                   </div>
                 )}
 
@@ -796,21 +812,37 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                   )}
 
                   <div className="form-group">
-                    <label htmlFor="weight">Weight {useImperial ? '(lb)' : '(kg)'}</label>
-                    <input
-                      type="number"
-                      id="weight"
-                      name="weight"
-                      value={formData.weight}
-                      onChange={handleInputChange}
-                      step={useImperial ? "0.1" : "0.001"}
-                      min="0"
-                      placeholder={useImperial ? "e.g., 7.2" : "e.g., 3.250"}
-                    />
+                    <label htmlFor="weight">Weight {useImperial ? '(lb and oz)' : '(kg)'}</label>
+                    <div className={useImperial ? 'weight-imperial' : undefined}>
+                      <input
+                        type="number"
+                        id="weight"
+                        name="weight"
+                        value={formData.weight}
+                        onChange={handleInputChange}
+                        step="any"
+                        min="0"
+                        placeholder={useImperial ? "lb, e.g., 7" : "e.g., 3.250"}
+                      />
+                      {useImperial && (
+                        <input
+                          type="number"
+                          id="weightOz"
+                          name="weightOz"
+                          aria-label="Weight ounces"
+                          value={formData.weightOz}
+                          onChange={handleInputChange}
+                          step="any"
+                          min="0"
+                          max="16"
+                          placeholder="oz, e.g., 3.5"
+                        />
+                      )}
+                    </div>
                     <small>
                       {useImperial 
-                        ? "Enter weight in pounds (e.g., 7.2 lb = 7 lb 3.2 oz)"
-                        : "Enter weight in kilograms"}
+                        ? "Pounds and ounces, e.g., 7 lb 3.5 oz"
+                        : "Enter weight in kilograms, to the gram if you have it"}
                     </small>
                   </div>
 
@@ -822,7 +854,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       name="height"
                       value={formData.height}
                       onChange={handleInputChange}
-                      step="0.001"
+                      step="any"
                       min="0"
                       placeholder={useImperial ? "e.g., 33.7" : "e.g., 85.5"}
                     />
@@ -841,7 +873,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                       name="headCircumference"
                       value={formData.headCircumference}
                       onChange={handleInputChange}
-                      step="0.001"
+                      step="any"
                       min="0"
                       placeholder={useImperial ? "e.g., 17.8" : "e.g., 45.2"}
                     />
@@ -878,7 +910,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               name="armCircumference"
                               value={formData.armCircumference}
                               onChange={handleInputChange}
-                              step="0.001"
+                              step="any"
                               min="0"
                               placeholder="e.g., 16.5"
                             />
@@ -892,7 +924,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               name="subscapularSkinfold"
                               value={formData.subscapularSkinfold}
                               onChange={handleInputChange}
-                              step="0.001"
+                              step="any"
                               min="0"
                               placeholder="e.g., 8.3"
                             />
@@ -906,7 +938,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                               name="tricepsSkinfold"
                               value={formData.tricepsSkinfold}
                               onChange={handleInputChange}
-                              step="0.001"
+                              step="any"
                               min="0"
                               placeholder="e.g., 9.1"
                             />
@@ -1053,14 +1085,27 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                             <div>
                               <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600, color: '#555' }}>Weight {useImperial ? '(lb)' : '(kg)'}</label>
                               {isEditing ? (
-                                <input
-                                  type="number"
-                                  value={editData.weight}
-                                  onChange={(e) => handleInlineEditChange('weight', e.target.value)}
-                                  placeholder={useImperial ? "lb" : "kg"}
-                                  step={useImperial ? "0.1" : "0.001"}
-                                  style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
-                                />
+                                <div className={useImperial ? 'weight-imperial' : undefined}>
+                                  <input
+                                    type="number"
+                                    value={editData.weight}
+                                    onChange={(e) => handleInlineEditChange('weight', e.target.value)}
+                                    placeholder={useImperial ? "lb" : "kg"}
+                                    step="any"
+                                    style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                                  />
+                                  {useImperial && (
+                                    <input
+                                      type="number"
+                                      aria-label="Weight ounces"
+                                      value={editData.weightOz || ''}
+                                      onChange={(e) => handleInlineEditChange('weightOz', e.target.value)}
+                                      placeholder="oz"
+                                      step="any"
+                                      style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                                    />
+                                  )}
+                                </div>
                               ) : (
                                 <div style={{ padding: '0.5rem', color: '#333' }}>{m.weight ? formatWeight(m.weight, useImperial) : '-'}</div>
                               )}
@@ -1073,7 +1118,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                   value={editData.height}
                                   onChange={(e) => handleInlineEditChange('height', e.target.value)}
                                   placeholder={useImperial ? "in" : "cm"}
-                                  step="0.001"
+                                  step="any"
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
@@ -1088,7 +1133,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                   value={editData.headCircumference}
                                   onChange={(e) => handleInlineEditChange('headCircumference', e.target.value)}
                                   placeholder={useImperial ? "in" : "cm"}
-                                  step="0.001"
+                                  step="any"
                                   style={{ width: '100%', padding: '0.5rem', fontSize: '0.9rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                 />
                               ) : (
@@ -1109,7 +1154,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                       value={editData.armCircumference}
                                       onChange={(e) => handleInlineEditChange('armCircumference', e.target.value)}
                                       placeholder={useImperial ? "in" : "cm"}
-                                      step="0.001"
+                                      step="any"
                                       style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                     />
                                   ) : (
@@ -1126,7 +1171,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                       value={editData.subscapularSkinfold}
                                       onChange={(e) => handleInlineEditChange('subscapularSkinfold', e.target.value)}
                                       placeholder="mm"
-                                      step="0.001"
+                                      step="any"
                                       style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                     />
                                   ) : (
@@ -1143,7 +1188,7 @@ function DataInputForm({ patientData = {}, people, selectedPersonId, onDataUpdat
                                       value={editData.tricepsSkinfold}
                                       onChange={(e) => handleInlineEditChange('tricepsSkinfold', e.target.value)}
                                       placeholder="mm"
-                                      step="0.001"
+                                      step="any"
                                       style={{ width: '80px', padding: '0.25rem', fontSize: '0.85rem', marginLeft: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
                                     />
                                   ) : (

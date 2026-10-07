@@ -355,12 +355,27 @@ function App() {
       sources: referenceSources,
       version: '2.0'
     }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const json = JSON.stringify(data, null, 2)
+    const date = new Date().toISOString().split('T')[0]
+    const filename = `growth-charts-data-${date}.json`
+
+    // Home screen web apps on iOS can't download files, so offer the share sheet
+    // (which has Save to Files) instead
+    const isHomeScreenApp = window.navigator.standalone === true ||
+      window.matchMedia?.('(display-mode: standalone)').matches
+    if (isHomeScreenApp && navigator.canShare) {
+      const file = new File([json], filename, { type: 'application/json' })
+      if (navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'Growth chart data' }).catch(() => {})
+        return
+      }
+    }
+
+    const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    const date = new Date().toISOString().split('T')[0]
-    a.download = `growth-charts-data-${date}.json`
+    a.download = filename
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -611,6 +626,7 @@ function App() {
         </p>
         <p>
           <a href="https://github.com/aussiedatagal/child-growth-calculator" target="_blank" rel="noopener noreferrer">View on GitHub</a> | 
+          <a href="https://github.com/aussiedatagal/child-growth-calculator/issues" target="_blank" rel="noopener noreferrer" style={{ marginLeft: '0.5rem' }}>Report a bug</a> | 
           <button 
             onClick={() => setShowPrivacyPolicy(true)}
             style={{

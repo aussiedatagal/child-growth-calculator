@@ -287,3 +287,14 @@
   }
 }
 
+
+.form-group small.term-birth-note {
+  margin-top: 0.35rem;
+  color: #856404;
+}
+
+.weight-imperial {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}

@@ -2134,7 +2134,7 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
       }, { timeout: 5000 })
 
       const weightInput = screen.getByLabelText(/weight \(kg\)/i)
-      expect(weightInput).toHaveAttribute('step', '0.001')
+      expect(weightInput).toHaveAttribute('step', 'any')
     })
   })
 
