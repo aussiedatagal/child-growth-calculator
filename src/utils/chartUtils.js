@@ -107,3 +107,48 @@ export const findClosestRow = (rows, value, key = 'ageYears', tolerance = 1 / 12
   if (value < min - tolerance || value > max + tolerance) return null
   return closest
 }
+
+const hasLMS = (L, M, S) =>
+  [L, M, S].every(v => typeof v === 'number' && !Number.isNaN(v)) && M > 0 && S > 0
+
+export const zFromLMS = (value, L, M, S) => {
+  if (!hasLMS(L, M, S) || !(value > 0)) return null
+  return Math.abs(L) < 0.0001 ? Math.log(value / M) / S : (Math.pow(value / M, L) - 1) / (L * S)
+}
+
+export const valueFromLMS = (z, L, M, S) => {
+  if (!hasLMS(L, M, S) || z == null) return null
+  if (Math.abs(L) < 0.0001) return M * Math.exp(S * z)
+  const base = 1 + L * S * z
+  return base > 0 ? M * Math.pow(base, 1 / L) : null
+}
+
+// Add a projected line to chart rows: where the child would be if they stayed
+// on the same z-score as their latest measurement, for the next 6 months (the
+// space the charts leave after the latest point). Preterm (Fenton) rows are
+// left out.
+export const addProjection = (rows, prefix, patientKey) => {
+  if (!rows || rows.length === 0) return rows
+  const projectedKey = `${patientKey}Projected`
+  const isReference = row => row[patientKey] == null && row.isPreemie !== true && hasLMS(row[`${prefix}L`], row[`${prefix}M`], row[`${prefix}S`])
+
+  const latest = rows
+    .filter(row => row[patientKey] != null && row.isPreemie !== true && typeof row.ageYears === 'number')
+    .reduce((a, b) => (!a || b.ageYears > a.ageYears ? b : a), null)
+  if (!latest) return rows
+
+  const references = rows.filter(isReference)
+  const nearest = findClosestRow(references, latest.ageYears)
+  if (!nearest) return rows
+  const z = zFromLMS(latest[patientKey], nearest[`${prefix}L`], nearest[`${prefix}M`], nearest[`${prefix}S`])
+  if (z == null) return rows
+
+  const horizon = 0.5
+  return rows.map(row => {
+    if (row === latest) return { ...row, [projectedKey]: row[patientKey] }
+    if (isReference(row) && row.ageYears > latest.ageYears && row.ageYears <= latest.ageYears + horizon) {
+      return { ...row, [projectedKey]: valueFromLMS(z, row[`${prefix}L`], row[`${prefix}M`], row[`${prefix}S`]) }
+    }
+    return row
+  })
+}
