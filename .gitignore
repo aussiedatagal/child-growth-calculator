@@ -71,3 +71,6 @@ TODO:
 *.temp
 
 
+
+# research behind the page stays local
+research/
