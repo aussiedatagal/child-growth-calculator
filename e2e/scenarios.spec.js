@@ -338,10 +338,15 @@ test('the tooltip stays inside the visible part of a scrolled chart', async ({ p
   })
   expect(outline).toBe('none')
   const box = await wrapper.boundingBox()
-  // The tooltip slides into place, so wait for it to settle
+  const pinnedTicks = chart.locator('.sticky-y-axis .recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value')
+  const axisRight = (await pinnedTicks.count()) > 0
+    ? await pinnedTicks.first().boundingBox().then(t => t.x + t.width)
+    : box.x
+  // The tooltip slides into place, so wait for it to settle: inside the
+  // visible chart and clear of the y-axis numbers
   await expect.poll(async () => {
     const tip = await tooltip.boundingBox()
-    return tip.x >= box.x - 1 && tip.x + tip.width <= box.x + box.width + 1
+    return tip.x >= box.x - 1 && tip.x >= axisRight && tip.x + tip.width <= box.x + box.width + 1
   }, { timeout: 3000 }).toBe(true)
   await shot(page, testInfo, 'tooltip-scrolled')
 })

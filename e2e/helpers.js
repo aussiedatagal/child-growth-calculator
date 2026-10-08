@@ -93,4 +93,4 @@ const normalCdf = (z) => {
   return z > 0 ? 1 - p : p
 }
 
-export const isPhone = (testInfo) => testInfo.project.name === 'phone'
+export const isPhone = (testInfo) => ['phone', 'iphone'].includes(testInfo.project.name)

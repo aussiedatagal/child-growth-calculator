@@ -18,6 +18,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
     },
     {
+      // Safari's engine with an iPhone screen, touch and user agent
+      name: 'iphone',
+      testMatch: /(scenarios|ios)\.spec\.js/,
+      use: { ...devices['iPhone 15'] },
+    },
+    {
       name: 'phone',
       testMatch: /scenarios\.spec\.js/,
       use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
