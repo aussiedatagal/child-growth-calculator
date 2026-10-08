@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LabelList, ReferenceLine, Tooltip } from 'recharts'
 import './GrowthCharts.css'
-import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, formatAgeLabel, calculateBMI, nullReferenceCurveFields, findClosestRow } from '../utils/chartUtils'
+import { parseCsv, toAgeYears, normalizeP3P15P50P85P97, calculatePercentileFromLMS, genderToKey, formatAgeLabel, calculateBMI, nullReferenceCurveFields, findClosestRow, addProjection } from '../utils/chartUtils'
 import { calculateCorrectedAge, isPretermBirth, getReferenceAgeYears } from '../utils/personUtils'
 import { loadReferenceData as loadCachedReferenceData } from '../utils/referenceDataCache'
 import { formatWeight, formatLength, kgToPounds, cmToInches, poundsToKg, inchesToCm } from '../utils/unitConversion'
@@ -103,6 +103,8 @@ const createYAxisLabel = (labelText) => {
   }
 }
 
+const STICKY_Y_AXIS_WIDTH = 61
+
 export const shouldStartDragZoom = (event) => event?.altKey === true
 
 // Helper to ensure gestationalAgeAtBirth is always a number
@@ -117,9 +119,10 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
   if (!active || !payload || !payload.length) return null
   
   // Check if patient entry exists in payload
+  const isProjected = (entry) => typeof entry.dataKey === 'string' && entry.dataKey.endsWith('Projected')
   const hasPatientEntry = payload.some(e => {
-    const isPatient = e.color === '#000' || 
-                     (e.dataKey && (e.dataKey === 'patientWeight' || e.dataKey === 'patientHeight' || e.dataKey === 'patientHC'))
+    const isPatient = !isProjected(e) && (e.color === '#000' ||
+                     (e.dataKey && (e.dataKey === 'patientWeight' || e.dataKey === 'patientHeight' || e.dataKey === 'patientHC')))
     return isPatient && e.value != null
   })
   
@@ -138,6 +141,9 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
                             chartType === 'hc' ? 'patientHC' : null
       
       if (patientDataKey) {
+        // Only pull in a measurement within 2 weeks of the hover position.
+        // Preterm charts use weeks on the x-axis, the others use years.
+        const tolerance = firstPayload?.xAxisValue != null ? 2 : 2 / 52.1775
         const patientPoints = chartData
           .map((d, index) => ({ data: d, index, x: d.xAxisValue != null ? d.xAxisValue : d.ageYears, value: d[patientDataKey] }))
           .filter(p => p.value != null && typeof p.x === 'number')
@@ -147,12 +153,11 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
             if (!closest) return current
             const closestDiff = Math.abs(closest.x - hoverX)
             const currentDiff = Math.abs(current.x - hoverX)
-            // Only include if within 2 weeks/units of hover position
-            if (currentDiff <= 2 && currentDiff < closestDiff) return current
+            if (currentDiff <= tolerance && currentDiff < closestDiff) return current
             return closest
           }, null)
           
-          if (closest && Math.abs(closest.x - hoverX) <= 2) {
+          if (closest && Math.abs(closest.x - hoverX) <= tolerance) {
             // Create a patient entry similar to what Recharts would provide
             patientEntryToAdd = {
               value: closest.value,
@@ -180,6 +185,7 @@ const OrderedTooltip = memo(({ active, payload, label, labelFormatter, formatter
   // Process payload to calculate dynamic percentiles for patient points
   const processedPayload = enhancedPayload.map(entry => {
     // Patient lines are black (#000) or have patient dataKey (patientWeight, patientHeight, patientHC)
+    if (isProjected(entry)) return { ...entry, name: 'Projected' }
     const isPatient = entry.color === '#000' || 
                      (entry.dataKey && (entry.dataKey === 'patientWeight' || entry.dataKey === 'patientHeight' || entry.dataKey === 'patientHC'))
     
@@ -633,6 +639,13 @@ const generateAgeTicks = (domain) => {
 }
 
 function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange, useImperial = false, onUseImperialChange }) {
+  const [showProjection, setShowProjection] = useState(() => {
+    try {
+      return localStorage.getItem('growthChartShowProjection') === 'true'
+    } catch {
+      return false
+    }
+  })
   const [wfaData, setWfaData] = useState(null)
   const [hfaData, setHfaData] = useState(null) // height-for-age (WHO lhfa; CDC lhfa+hfa merge)
   const [hcfaData, setHcfaData] = useState(null)
@@ -2516,16 +2529,28 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   }, [])
   
   const wfaChartDataFiltered = useMemo(() => filterDataByAge(wfaChartDataRaw, 'wfa'), [filterDataByAge, wfaChartDataRaw])
-  const wfaChartData = wfaChartDataFiltered
+  const wfaChartData = useMemo(
+    () => (showProjection ? addProjection(wfaChartDataFiltered, 'weight', 'patientWeight') : wfaChartDataFiltered),
+    [showProjection, wfaChartDataFiltered]
+  )
   
   const hfaChartDataFiltered = useMemo(() => filterDataByAge(hfaChartDataRaw, 'hfa'), [filterDataByAge, hfaChartDataRaw])
-  const hfaChartData = hfaChartDataFiltered
+  const hfaChartData = useMemo(
+    () => (showProjection ? addProjection(hfaChartDataFiltered, 'height', 'patientHeight') : hfaChartDataFiltered),
+    [showProjection, hfaChartDataFiltered]
+  )
   
   const hcfaChartDataFiltered = useMemo(() => filterDataByAge(hcfaChartDataRaw, 'hcfa'), [filterDataByAge, hcfaChartDataRaw])
-  const hcfaChartData = hcfaChartDataFiltered
+  const hcfaChartData = useMemo(
+    () => (showProjection ? addProjection(hcfaChartDataFiltered, 'hc', 'patientHC') : hcfaChartDataFiltered),
+    [showProjection, hcfaChartDataFiltered]
+  )
   
   const bmifaChartDataFiltered = useMemo(() => filterDataByAge(bmifaChartDataRaw, 'bmi'), [filterDataByAge, bmifaChartDataRaw])
-  const bmifaChartData = bmifaChartDataFiltered
+  const bmifaChartData = useMemo(
+    () => (showProjection ? addProjection(bmifaChartDataFiltered, 'bmi', 'patientBMI') : bmifaChartDataFiltered),
+    [showProjection, bmifaChartDataFiltered]
+  )
   
   const acfaChartDataFiltered = useMemo(() => filterDataByAge(acfaChartDataRaw, 'acfa'), [filterDataByAge, acfaChartDataRaw])
   const acfaChartData = acfaChartDataFiltered
@@ -2677,6 +2702,23 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
         <LabelList content={<PatientPointLabel />} />
       </Line>
     )
+
+    const projectedKey = `${patientDataKey}Projected`
+    const projectionLine = chartData?.some(row => row[projectedKey] != null) ? (
+      <Line
+        key="projected"
+        type="monotone"
+        dataKey={projectedKey}
+        stroke="#000"
+        strokeWidth={2}
+        strokeDasharray="6 4"
+        dot={false}
+        activeDot={false}
+        name="Projected"
+        connectNulls={true}
+        isAnimationActive={false}
+      />
+    ) : null
     
     const renderAllPercentiles = (insertPatientAt) => {
       const lines = [
@@ -2710,6 +2752,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       } else {
         lines.unshift(patientLine)
       }
+      if (projectionLine) lines.push(projectionLine)
       
       return <>{lines}</>
     }
@@ -2920,6 +2963,80 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
 
+  // Y-axis settings, shared by each chart and its pinned copy (see renderStickyYAxis)
+  const wfaYAxisProps = {
+    domain: calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight', 'patientWeightProjected'], 'wfa', isPretermBirth(patientData?.gestationalAgeAtBirth)),
+    allowDataOverflow: true,
+    label: { value: useImperial ? 'Weight (lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft', offset: 10 },
+    tickFormatter: formatWeightTick
+  }
+  const hfaYAxisProps = {
+    domain: calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight', 'patientHeightProjected'], 'hfa', isPretermBirth(patientData?.gestationalAgeAtBirth)),
+    allowDataOverflow: true,
+    label: { value: useImperial ? 'Height (in)' : 'Height (cm)', angle: -90, position: 'insideLeft' },
+    tickFormatter: formatHeightTick
+  }
+  const hcfaYAxisProps = {
+    domain: calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC', 'patientHCProjected'], 'hcfa', isPretermBirth(patientData?.gestationalAgeAtBirth)),
+    allowDataOverflow: true,
+    label: createYAxisLabel(useImperial ? 'Head Circumference (in)' : 'Head Circumference (cm)'),
+    tickFormatter: formatHeightTick
+  }
+  const bmiYAxisProps = {
+    domain: calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI', 'patientBMIProjected'], 'bmi', false),
+    allowDataOverflow: true,
+    label: { value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' },
+    tickFormatter: formatBMITick
+  }
+  const acfaYAxisProps = {
+    domain: calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], 'acfa', false),
+    allowDataOverflow: true,
+    label: createYAxisLabel(useImperial ? 'Arm Circumference (in)' : 'Arm Circumference (cm)'),
+    tickFormatter: formatHeightTick
+  }
+  const ssfaYAxisProps = {
+    domain: calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], 'ssfa', false),
+    allowDataOverflow: true,
+    label: { value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } },
+    tickFormatter: formatSkinfoldTick
+  }
+  const tsfaYAxisProps = {
+    domain: calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], 'tsfa', false),
+    allowDataOverflow: true,
+    label: { value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } },
+    tickFormatter: formatSkinfoldTick
+  }
+
+  // On phones the charts are wider than the screen, and a tooltip placed next
+  // to the touched point can end up off the visible part. Pin it to the left
+  // of what's visible, just right of the y-axis.
+  const getTooltipPosition = (chartType) => {
+    const isNarrow = typeof window !== 'undefined' && window.innerWidth < 768
+    if (!isNarrow) return { x: 'auto', y: 'auto' }
+    const scrollLeft = chartScrollState[chartType]?.scrollLeft || 0
+    return { x: scrollLeft + getChartMargins().left + STICKY_Y_AXIS_WIDTH + 4, y: 0 }
+  }
+
+  // Once a wide chart is scrolled sideways its y-axis scrolls out of view, so
+  // pin a copy of it to the left edge
+  const renderStickyYAxis = (chartType, yAxisProps) => {
+    if (!(chartScrollState[chartType]?.scrollLeft > 4)) return null
+    const margin = getChartMargins()
+    const width = margin.left + STICKY_Y_AXIS_WIDTH
+    const height = typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400
+    return (
+      <div className="sticky-y-axis" style={{ width }} aria-hidden="true">
+        {/* Clip just below the plot area so the x-axis title stays visible */}
+        <div className="sticky-y-axis-inner" style={{ width, height: height - margin.bottom - 30 + 12 }}>
+          <LineChart width={width} height={height} data={[{ x: 0 }]} margin={{ ...margin, right: 0 }}>
+            <XAxis dataKey="x" tick={false} axisLine={false} tickLine={false} />
+            <YAxis {...yAxisProps} width={STICKY_Y_AXIS_WIDTH - 1} />
+          </LineChart>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="growth-charts">
       <div style={{ marginBottom: '1.5rem' }}>
@@ -3028,7 +3145,29 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       <div className="chart-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <h3 className="section-header" style={{ margin: 0 }}>Age-based Charts</h3>
+          <label className="projection-toggle">
+            <input
+              type="checkbox"
+              id="showProjection"
+              checked={showProjection}
+              onChange={(e) => {
+                setShowProjection(e.target.checked)
+                try {
+                  localStorage.setItem('growthChartShowProjection', String(e.target.checked))
+                } catch {
+                  // Storage can be unavailable (private browsing); the toggle still works
+                }
+              }}
+            />
+            Show projected growth
+          </label>
         </div>
+        {showProjection && (
+          <p className="projection-note">
+            The dashed line shows where your child would be if they stayed on the same percentile as their latest measurement.
+            Children often move between percentiles, especially in the first two years, so treat it as a guide.
+          </p>
+        )}
         
         {/* 1. Weight-for-Age */}
       {wfaChartData && wfaChartData.length > 0 && (
@@ -3048,6 +3187,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
             </div>
           ) : (
           <div className="chart-scroll-wrapper" ref={setChartScrollRef('wfa')} onScroll={(e) => handleChartScroll('wfa', e)} onWheel={handleScrollWrapperWheel}>
+            {renderStickyYAxis('wfa', wfaYAxisProps)}
           <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('wfa', isPretermBirth(patientData?.gestationalAgeAtBirth)) }}>
           <ZoomableChart chartType="wfa" isPreemie={isPretermBirth(patientData?.gestationalAgeAtBirth)}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
@@ -3084,19 +3224,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 label={{ value: isPretermBirth(patientData?.gestationalAgeAtBirth) ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
               />
-              <YAxis 
-                domain={calculateYDomain(wfaChartData, ['weightP3', 'weightP15', 'weightP25', 'weightP50', 'weightP75', 'weightP85', 'weightP97', 'patientWeight'], 'wfa', isPretermBirth(patientData?.gestationalAgeAtBirth))}
-                allowDataOverflow={true}
-                label={{ value: useImperial ? 'Weight (lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft', offset: 10 }}
-                tickFormatter={formatWeightTick}
-              />
+              <YAxis {...wfaYAxisProps} />
               <Tooltip 
                 content={<OrderedTooltip chartType="weight" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} chartData={wfaChartData} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
                 shared={true}
-                position={{ x: 'auto', y: 'auto' }}
+                position={getTooltipPosition('wfa')}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('weight', 'weight', 'patientWeight', wfaChartData, patientData?.measurements, m => m.weight, 'wfa')}
@@ -3132,6 +3267,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
             </div>
           ) : (
           <div className="chart-scroll-wrapper" ref={setChartScrollRef('hfa')} onScroll={(e) => handleChartScroll('hfa', e)} onWheel={handleScrollWrapperWheel}>
+            {renderStickyYAxis('hfa', hfaYAxisProps)}
           <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('hfa', isPretermBirth(patientData?.gestationalAgeAtBirth)) }}>
           <ZoomableChart chartType="hfa" isPreemie={isPretermBirth(patientData?.gestationalAgeAtBirth)}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
@@ -3161,19 +3297,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 label={{ value: isPretermBirth(patientData?.gestationalAgeAtBirth) ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
               />
-              <YAxis 
-                domain={calculateYDomain(hfaChartData, ['heightP3', 'heightP15', 'heightP25', 'heightP50', 'heightP75', 'heightP85', 'heightP97', 'patientHeight'], 'hfa', isPretermBirth(patientData?.gestationalAgeAtBirth))}
-                allowDataOverflow={true}
-                label={{ value: useImperial ? 'Height (in)' : 'Height (cm)', angle: -90, position: 'insideLeft' }}
-                tickFormatter={formatHeightTick}
-              />
+              <YAxis {...hfaYAxisProps} />
               <Tooltip 
                 content={<OrderedTooltip chartType="height" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} chartData={hfaChartData} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
                 shared={true}
-                position={{ x: 'auto', y: 'auto' }}
+                position={getTooltipPosition('hfa')}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('height', 'height', 'patientHeight', hfaChartData, patientData?.measurements, m => m.height, 'hfa')}
@@ -3209,6 +3340,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
             </div>
           ) : (
           <div className="chart-scroll-wrapper" ref={setChartScrollRef('hcfa')} onScroll={(e) => handleChartScroll('hcfa', e)} onWheel={handleScrollWrapperWheel}>
+            {renderStickyYAxis('hcfa', hcfaYAxisProps)}
           <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('hcfa', isPretermBirth(patientData?.gestationalAgeAtBirth)) }}>
           <ZoomableChart chartType="hcfa" isPreemie={isPretermBirth(patientData?.gestationalAgeAtBirth)}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
@@ -3238,19 +3370,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 label={{ value: isPretermBirth(patientData?.gestationalAgeAtBirth) ? 'Post-Menstrual Age (weeks) / Adjusted Age' : ageLabel, position: 'insideBottom', offset: -10 }}
                 allowDuplicatedCategory={false}
               />
-              <YAxis 
-                domain={calculateYDomain(hcfaChartData, ['hcP3', 'hcP15', 'hcP25', 'hcP50', 'hcP75', 'hcP85', 'hcP97', 'patientHC'], 'hcfa', isPretermBirth(patientData?.gestationalAgeAtBirth))}
-                allowDataOverflow={true}
-                label={createYAxisLabel(useImperial ? 'Head Circumference (in)' : 'Head Circumference (cm)')}
-                tickFormatter={formatHeightTick}
-              />
+              <YAxis {...hcfaYAxisProps} />
               <Tooltip 
                 content={<OrderedTooltip chartType="hc" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} chartData={hcfaChartData} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
                 shared={true}
-                position={{ x: 'auto', y: 'auto' }}
+                position={getTooltipPosition('hcfa')}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('hc', 'hc', 'patientHC', hcfaChartData, patientData?.measurements, m => m.headCircumference, 'hcfa')}
@@ -3281,6 +3408,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
             </div>
           ) : (
           <div className="chart-scroll-wrapper" ref={setChartScrollRef('bmi')} onScroll={(e) => handleChartScroll('bmi', e)} onWheel={handleScrollWrapperWheel}>
+            {renderStickyYAxis('bmi', bmiYAxisProps)}
           <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('bmi', false) }}>
           <ZoomableChart chartType="bmi" isPreemie={false}>
           <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
@@ -3298,19 +3426,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 allowDataOverflow={true}
                 padding={{ left: 0, right: 0 }}
               />
-              <YAxis 
-                domain={calculateYDomain(bmifaChartData, ['bmiP3', 'bmiP15', 'bmiP25', 'bmiP50', 'bmiP75', 'bmiP85', 'bmiP97', 'patientBMI'], 'bmi', false)}
-                allowDataOverflow={true}
-                label={{ value: 'BMI (kg/m²)', angle: -90, position: 'insideLeft' }}
-                tickFormatter={formatBMITick}
-              />
+              <YAxis {...bmiYAxisProps} />
               <Tooltip 
                 content={<OrderedTooltip chartType="bmi" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                 cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                 allowEscapeViewBox={{ x: true, y: true }}
                 trigger={['hover', 'click']}
                 shared={true}
-                position={{ x: 'auto', y: 'auto' }}
+                position={getTooltipPosition('bmi')}
               />
               {/* Legend removed - labels now appear at end of lines */}
               {renderPercentileLines('bmi', 'bmi', 'patientBMI', bmifaChartData, patientData?.measurements.map(m => ({ ...m, bmi: calculateBMI(m.weight, m.height) })), m => m.bmi, 'bmi')}
@@ -3344,6 +3467,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 </div>
               ) : (
               <div className="chart-scroll-wrapper" ref={setChartScrollRef('acfa')} onScroll={(e) => handleChartScroll('acfa', e)} onWheel={handleScrollWrapperWheel}>
+                {renderStickyYAxis('acfa', acfaYAxisProps)}
               <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('acfa', false) }}>
               <ZoomableChart chartType="acfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
@@ -3358,19 +3482,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     ticks={generateAgeTicks(getChartDomain('acfa', false))}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
-                  <YAxis 
-                    domain={calculateYDomain(acfaChartData, ['acfaP3', 'acfaP15', 'acfaP25', 'acfaP50', 'acfaP75', 'acfaP85', 'acfaP97', 'patientACFA'], 'acfa', false)}
-                    allowDataOverflow={true}
-                    label={createYAxisLabel(useImperial ? 'Arm Circumference (in)' : 'Arm Circumference (cm)')}
-                    tickFormatter={formatHeightTick}
-                  />
+                  <YAxis {...acfaYAxisProps} />
                   <Tooltip 
                     content={<OrderedTooltip chartType="acfa" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
                     shared={true}
-                    position={{ x: 'auto', y: 'auto' }}
+                    position={getTooltipPosition('acfa')}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('acfa', 'acfa', 'patientACFA', acfaChartData, patientData?.measurements, m => m.armCircumference, 'acfa')}
@@ -3396,6 +3515,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 </div>
               ) : (
               <div className="chart-scroll-wrapper" ref={setChartScrollRef('ssfa')} onScroll={(e) => handleChartScroll('ssfa', e)} onWheel={handleScrollWrapperWheel}>
+                {renderStickyYAxis('ssfa', ssfaYAxisProps)}
               <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('ssfa', false) }}>
               <ZoomableChart chartType="ssfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
@@ -3410,19 +3530,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     ticks={generateAgeTicks(getChartDomain('ssfa', false))}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
-                  <YAxis 
-                    domain={calculateYDomain(ssfaChartData, ['ssfaP3', 'ssfaP15', 'ssfaP25', 'ssfaP50', 'ssfaP75', 'ssfaP85', 'ssfaP97', 'patientSSFA'], 'ssfa', false)}
-                    allowDataOverflow={true}
-                    label={{ value: 'Subscapular Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
-                    tickFormatter={formatSkinfoldTick}
-                  />
+                  <YAxis {...ssfaYAxisProps} />
                   <Tooltip 
                     content={<OrderedTooltip chartType="ssfa" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
                     shared={true}
-                    position={{ x: 'auto', y: 'auto' }}
+                    position={getTooltipPosition('ssfa')}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('ssfa', 'ssfa', 'patientSSFA', ssfaChartData, patientData?.measurements, m => m.subscapularSkinfold, 'ssfa')}
@@ -3448,6 +3563,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                 </div>
               ) : (
               <div className="chart-scroll-wrapper" ref={setChartScrollRef('tsfa')} onScroll={(e) => handleChartScroll('tsfa', e)} onWheel={handleScrollWrapperWheel}>
+                {renderStickyYAxis('tsfa', tsfaYAxisProps)}
               <div className="chart-scroll-inner" style={{ minWidth: getScrollableChartWidth('tsfa', false) }}>
               <ZoomableChart chartType="tsfa" isPreemie={false}>
               <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 768 ? 350 : 400}>
@@ -3462,19 +3578,14 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                     ticks={generateAgeTicks(getChartDomain('tsfa', false))}
                     label={{ value: ageLabel, position: 'insideBottom', offset: -10 }}
                   />
-                  <YAxis 
-                    domain={calculateYDomain(tsfaChartData, ['tsfaP3', 'tsfaP15', 'tsfaP25', 'tsfaP50', 'tsfaP75', 'tsfaP85', 'tsfaP97', 'patientTSFA'], 'tsfa', false)}
-                    allowDataOverflow={true}
-                    label={{ value: 'Triceps Skinfold (mm)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
-                    tickFormatter={formatSkinfoldTick}
-                  />
+                  <YAxis {...tsfaYAxisProps} />
                   <Tooltip 
                     content={<OrderedTooltip chartType="tsfa" patientData={patientData} useImperial={useImperial} getPatientPercentile={getPatientPercentile} />}
                     cursor={{ stroke: '#667eea', strokeWidth: 1, strokeDasharray: '3 3' }}
                     allowEscapeViewBox={{ x: true, y: true }}
                     trigger={['hover', 'click']}
                     shared={true}
-                    position={{ x: 'auto', y: 'auto' }}
+                    position={getTooltipPosition('tsfa')}
                   />
                   {/* Legend removed - labels now appear at end of lines */}
                   {renderPercentileLines('tsfa', 'tsfa', 'patientTSFA', tsfaChartData, patientData?.measurements, m => m.tricepsSkinfold, 'tsfa')}
@@ -3518,7 +3629,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
                   allowDataOverflow={true}
                 />
                 <YAxis
-                  domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight'], null)}
+                  domain={calculateYDomain(whChartData, ['p3', 'p15', 'p25', 'p50', 'p75', 'p85', 'p97', 'patientWeight', 'patientWeightProjected'], null)}
                   label={{ value: useImperial ? 'Weight (lb)' : 'Weight (kg)', angle: -90, position: 'insideLeft' }}
                   tickFormatter={formatWeightTick}
                 />

@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { test, expect } from '@playwright/test'
-import { seed, person, measurement, addDays, watchErrors, shot, boxPercentile, whoPercentile, isPhone } from './helpers'
+import { seed, person, measurement, addDays, watchErrors, shot, boxPercentile, whoPercentile, whoZ, whoValue, isPhone } from './helpers'
 
 const BIRTH = '2024-01-01'
 const infant = (gestationalAgeAtBirth, gender = 'female') => person({
@@ -105,9 +105,10 @@ test.describe('percentiles match the WHO tables', () => {
 test.describe('charts', () => {
   test('the y-axis fits a young baby instead of the whole 0-5 year range', async ({ page }, testInfo) => {
     await seed(page, [infant(40)])
-    const ticks = await page.locator('.chart-container').first().locator('.recharts-yAxis .recharts-cartesian-axis-tick-value').allTextContents()
-    const top = Math.max(...ticks.map(Number).filter(n => !Number.isNaN(n)))
-    expect(top).toBeLessThan(13)
+    const ticks = await page.locator('.chart-container').first().locator('.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value').allTextContents()
+    const numbers = ticks.map(Number).filter(n => !Number.isNaN(n))
+    expect(numbers.length).toBeGreaterThan(2)
+    expect(Math.max(...numbers)).toBeLessThan(13)
     await shot(page, testInfo, 'y-axis')
   })
 
@@ -115,21 +116,26 @@ test.describe('charts', () => {
     const p = infant(40)
     p.measurements.push(measurement(BIRTH, '2027-01-01', { weight: 14, height: 94 }))
     await seed(page, [p])
+    let checked = 0
     for (const chart of await page.locator('.chart-scroll-wrapper').all()) {
       const dots = chart.locator('.recharts-line-dots circle')
       if (await dots.count() === 0) continue
+      checked++
       const box = await chart.boundingBox()
       const last = await dots.last().boundingBox()
       expect(last.x).toBeGreaterThanOrEqual(box.x)
       expect(last.x + last.width).toBeLessThanOrEqual(box.x + box.width)
     }
+    expect(checked).toBeGreaterThanOrEqual(3)
     await shot(page, testInfo, 'scrolled-to-latest')
   })
 
   test('imperial charts show pounds and inches on the axes', async ({ page }, testInfo) => {
     const topTick = async (index) => {
-      const ticks = await page.locator('.chart-container').nth(index).locator('.recharts-yAxis .recharts-cartesian-axis-tick-value').allTextContents()
-      return Math.max(...ticks.map(Number).filter(n => !Number.isNaN(n)))
+      const ticks = await page.locator('.chart-container').nth(index).locator('.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value').allTextContents()
+      const numbers = ticks.map(Number).filter(n => !Number.isNaN(n))
+      expect(numbers.length).toBeGreaterThan(2)
+      return Math.max(...numbers)
     }
     await seed(page, [infant(40)])
     const kg = await topTick(0)
@@ -273,3 +279,110 @@ test('the footer links to GitHub issues for bug reports', async ({ page }) => {
   const link = page.getByRole('link', { name: 'Report a bug' })
   await expect(link).toHaveAttribute('href', 'https://github.com/aussiedatagal/child-growth-calculator/issues')
 })
+
+const toddler = () => person({
+  measurements: [
+    ['2024-01-01', 3.3, 50], ['2024-04-01', 6.2, 61], ['2024-10-01', 8.4, 69],
+    ['2025-04-01', 9.6, 75], ['2026-01-01', 11.5, 84], ['2026-10-01', 12.9, 90]
+  ].map(([date, weight, height]) => measurement(BIRTH, date, { weight, height }))
+})
+
+test.describe('y-axis on scrolled charts', () => {
+  test('a pinned y-axis with the same numbers appears once the chart scrolls', async ({ page }, testInfo) => {
+    await seed(page, [toddler()])
+    const chart = page.locator('.chart-container').first()
+    await chart.scrollIntoViewIfNeeded()
+    const wrapper = chart.locator('.chart-scroll-wrapper')
+    await expect.poll(() => wrapper.evaluate(n => n.scrollLeft)).toBeGreaterThan(0)
+    const pinned = chart.locator('.sticky-y-axis')
+    await expect(pinned.locator('.sticky-y-axis-inner')).toBeVisible()
+
+    const mainTicks = await chart.locator('.chart-scroll-inner .recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value').allTextContents()
+    const pinnedTicks = await pinned.locator('.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value').allTextContents()
+    expect(mainTicks.length).toBeGreaterThan(2)
+    expect(pinnedTicks).toEqual(mainTicks)
+
+    // The pinned axis stays at the left edge of the visible chart
+    const wrapperBox = await wrapper.boundingBox()
+    const pinnedBox = await pinned.locator('.sticky-y-axis-inner').boundingBox()
+    expect(Math.abs(pinnedBox.x - wrapperBox.x)).toBeLessThan(2)
+
+    // and lines up with the real axis
+    const mainTop = await chart.locator('.chart-scroll-inner .recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value').first().boundingBox()
+    const pinnedTop = await pinned.locator('.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value').first().boundingBox()
+    expect(Math.abs(mainTop.y - pinnedTop.y)).toBeLessThan(1)
+
+    await wrapper.evaluate(n => { n.scrollLeft = 0 })
+    await expect(pinned).toHaveCount(0)
+    await wrapper.evaluate(n => { n.scrollLeft = n.scrollWidth })
+    await expect(pinned.locator('.sticky-y-axis-inner')).toBeVisible()
+    await shot(page, testInfo, 'pinned-y-axis')
+  })
+})
+
+test('the tooltip stays inside the visible part of a scrolled chart', async ({ page }, testInfo) => {
+  await seed(page, [toddler()])
+  const chart = page.locator('.chart-container').first()
+  await chart.scrollIntoViewIfNeeded()
+  const wrapper = chart.locator('.chart-scroll-wrapper')
+  await expect.poll(() => wrapper.evaluate(n => n.scrollLeft)).toBeGreaterThan(0)
+  const dot = await chart.locator('.recharts-line-dots circle').last().boundingBox()
+  await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2)
+  if (isPhone(testInfo)) await page.mouse.click(dot.x + dot.width / 2, dot.y + dot.height / 2)
+  const tooltip = chart.locator('.recharts-tooltip-wrapper').first()
+  await expect(tooltip).toContainText('kg')
+  const box = await wrapper.boundingBox()
+  // The tooltip slides into place, so wait for it to settle
+  await expect.poll(async () => {
+    const tip = await tooltip.boundingBox()
+    return tip.x >= box.x - 1 && tip.x + tip.width <= box.x + box.width + 1
+  }, { timeout: 3000 }).toBe(true)
+  await shot(page, testInfo, 'tooltip-scrolled')
+})
+
+test.describe('projected growth', () => {
+  test('is off by default and remembered when switched on', async ({ page }) => {
+    await seed(page, [toddler()])
+    await expect(page.locator('#showProjection')).not.toBeChecked()
+    await expect(page.locator('.recharts-line path[stroke-dasharray="6 4"]')).toHaveCount(0)
+    await page.locator('#showProjection').check()
+    await expect(page.locator('.projection-note')).toBeVisible()
+    await page.reload()
+    await expect(page.locator('#showProjection')).toBeChecked()
+  })
+
+  test('follows the latest percentile for 6 months on weight, height and BMI', async ({ page }, testInfo) => {
+    await seed(page, [toddler()], { growthChartShowProjection: 'true' })
+    const dashed = page.locator('.recharts-line path.recharts-curve[stroke-dasharray="6 4"]')
+    // weight, height, BMI (no head measurements in this data)
+    await expect(dashed).toHaveCount(3)
+
+    // Hover partway along the projection and compare with the WHO tables
+    const chart = page.locator('.chart-container').first()
+    await chart.scrollIntoViewIfNeeded()
+    const end = await dashed.first().evaluate(path => {
+      const p = path.getPointAtLength(path.getTotalLength() * 0.5)
+      const r = path.ownerSVGElement.getBoundingClientRect()
+      return { x: r.x + p.x, y: r.y + p.y }
+    })
+    await page.mouse.move(end.x, end.y)
+    const tooltip = chart.locator('.recharts-tooltip-wrapper').first()
+    await expect(tooltip).toContainText('Projected')
+    const projected = parseFloat((await tooltip.innerText()).match(/Projected: ([\d.]+)/)[1])
+
+    const lastAgeMonths = (new Date('2026-10-01') - new Date(BIRTH)) / 86400000 / 365.25 * 12
+    const z = whoZ('wfa_girls_who.json', lastAgeMonths, 12.9)
+    const label = (await tooltip.innerText()).match(/([\d.]+)y/)
+    const hoverMonths = label ? parseFloat(label[1]) * 12 : lastAgeMonths + 6
+    expect(projected).toBeCloseTo(whoValue('wfa_girls_who.json', hoverMonths, z), 1)
+    await shot(page, testInfo, 'projection')
+  })
+
+  test('is not drawn for a preterm baby still before 42 weeks', async ({ page }) => {
+    await seed(page, [person({ gestationalAgeAtBirth: 28, measurements: [
+      measurement(BIRTH, BIRTH, { weight: 1.1 }), measurement(BIRTH, addDays(BIRTH, 35), { weight: 1.6 })
+    ] })], { growthChartShowProjection: 'true' })
+    await expect(page.locator('.chart-container').first().locator('path[stroke-dasharray="6 4"]')).toHaveCount(0)
+  })
+})
+

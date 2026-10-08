@@ -67,14 +67,23 @@ export const boxPercentile = async (page, label) => {
   return match ? parseFloat(match[1]) : null
 }
 
-// Independent check: percentile from the WHO LMS row nearest the given age
-export const whoPercentile = (file, ageMonths, value) => {
+// Independent checks against the WHO LMS row nearest the given age
+const whoRow = (file, ageMonths) => {
   const rows = JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), 'utf8'))
-  const row = rows.reduce((a, b) => (Math.abs(b.Month - ageMonths) < Math.abs(a.Month - ageMonths) ? b : a))
-  const { L, M, S } = row
-  const z = L === 0 ? Math.log(value / M) / S : (Math.pow(value / M, L) - 1) / (L * S)
-  return normalCdf(z) * 100
+  return rows.reduce((a, b) => (Math.abs(b.Month - ageMonths) < Math.abs(a.Month - ageMonths) ? b : a))
 }
+
+export const whoZ = (file, ageMonths, value) => {
+  const { L, M, S } = whoRow(file, ageMonths)
+  return L === 0 ? Math.log(value / M) / S : (Math.pow(value / M, L) - 1) / (L * S)
+}
+
+export const whoValue = (file, ageMonths, z) => {
+  const { L, M, S } = whoRow(file, ageMonths)
+  return L === 0 ? M * Math.exp(S * z) : M * Math.pow(1 + L * S * z, 1 / L)
+}
+
+export const whoPercentile = (file, ageMonths, value) => normalCdf(whoZ(file, ageMonths, value)) * 100
 
 const normalCdf = (z) => {
   // Abramowitz and Stegun 26.2.17

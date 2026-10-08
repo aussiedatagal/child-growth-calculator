@@ -255,3 +255,46 @@
   overflow: hidden;
   max-width: 100%;
 }
+
+.projection-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+}
+
+.projection-toggle input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.projection-note {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0 0 1rem;
+}
+
+/* Pinned copy of the y-axis for charts scrolled sideways. Zero height so it
+   doesn't push the chart down; sticky so it stays at the left edge. */
+.sticky-y-axis {
+  position: sticky;
+  left: 0;
+  height: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.sticky-y-axis-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: linear-gradient(to right, #f8f9fa 85%, rgba(248, 249, 250, 0));
+}
+
+.sticky-y-axis-inner {
+  overflow: hidden;
+}
