@@ -656,9 +656,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   const [weightHeightData, setWeightHeightData] = useState(null)
   // Preemie data
   const [fentonData, setFentonData] = useState(null)
-  const [intergrowthWeightData, setIntergrowthWeightData] = useState(null)
-  const [intergrowthLengthData, setIntergrowthLengthData] = useState(null)
-  const [intergrowthHCData, setIntergrowthHCData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isRendering, setIsRendering] = useState(true)
   
@@ -725,83 +722,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
         } else {
           setFentonData(rawData)
         }
-      }
-      
-      // Load INTERGROWTH-21st data
-      const intergrowthWeightPath = `${baseUrl}data/intergrowth_weight_${gender}.csv`
-      const intergrowthLengthPath = `${baseUrl}data/intergrowth_length_${gender}.csv`
-      const intergrowthHCPath = `${baseUrl}data/intergrowth_headCircumference_${gender}.csv`
-      
-      const [weightRes, lengthRes, hcRes] = await Promise.all([
-        fetch(intergrowthWeightPath).catch(() => null),
-        fetch(intergrowthLengthPath).catch(() => null),
-        fetch(intergrowthHCPath).catch(() => null)
-      ])
-      
-      if (weightRes && weightRes.ok) {
-        const weightText = await weightRes.text()
-        const weightRows = parseCsv(weightText)
-        const weightProcessed = weightRows
-          .map(r => {
-            const week = parseFloat(r.week)
-            if (typeof week !== 'number' || Number.isNaN(week)) return null
-            return {
-              week,
-              weightP3: r.p3 ? parseFloat(r.p3) : null,
-              weightP50: r.p50 ? parseFloat(r.p50) : null,
-              weightP97: r.p97 ? parseFloat(r.p97) : null,
-              weightL: r.L ? parseFloat(r.L) : null,
-              weightM: r.M ? parseFloat(r.M) : null,
-              weightS: r.S ? parseFloat(r.S) : null,
-            }
-          })
-          .filter(Boolean)
-          .sort((a, b) => a.week - b.week)
-        setIntergrowthWeightData(weightProcessed)
-      }
-      
-      if (lengthRes && lengthRes.ok) {
-        const lengthText = await lengthRes.text()
-        const lengthRows = parseCsv(lengthText)
-        const lengthProcessed = lengthRows
-          .map(r => {
-            const week = parseFloat(r.week)
-            if (typeof week !== 'number' || Number.isNaN(week)) return null
-            return {
-              week,
-              heightP3: r.p3 ? parseFloat(r.p3) : null,
-              heightP50: r.p50 ? parseFloat(r.p50) : null,
-              heightP97: r.p97 ? parseFloat(r.p97) : null,
-              heightL: r.L ? parseFloat(r.L) : null,
-              heightM: r.M ? parseFloat(r.M) : null,
-              heightS: r.S ? parseFloat(r.S) : null,
-            }
-          })
-          .filter(Boolean)
-          .sort((a, b) => a.week - b.week)
-        setIntergrowthLengthData(lengthProcessed)
-      }
-      
-      if (hcRes && hcRes.ok) {
-        const hcText = await hcRes.text()
-        const hcRows = parseCsv(hcText)
-        const hcProcessed = hcRows
-          .map(r => {
-            const week = parseFloat(r.week)
-            if (typeof week !== 'number' || Number.isNaN(week)) return null
-            return {
-              week,
-              hcP3: r.p3 ? parseFloat(r.p3) : null,
-              hcP50: r.p50 ? parseFloat(r.p50) : null,
-              hcP97: r.p97 ? parseFloat(r.p97) : null,
-              hcL: r.L ? parseFloat(r.L) : null,
-              hcM: r.M ? parseFloat(r.M) : null,
-              hcS: r.S ? parseFloat(r.S) : null,
-            }
-          })
-          .filter(Boolean)
-          .sort((a, b) => a.week - b.week)
-        setIntergrowthHCData(hcProcessed)
       }
     } catch (error) {
       console.error('Error loading preemie data:', error)
@@ -1027,7 +947,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       setBmifaData(bmifaProcessed)
       setWeightHeightData(whCombined)
       
-      // Load preemie data (Fenton 2013 and INTERGROWTH-21st)
+      // Load preemie data (Fenton 2025)
       await loadPreemieData(gKey)
       
       setLoading(false)
@@ -1036,104 +956,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       setLoading(false)
     }
   }
-
-  const shouldUsePreemieData = useCallback((measurementDate) => {
-    if (!patientData?.birthDate || !patientData?.gestationalAgeAtBirth) return false
-    const correctedAge = calculateCorrectedAge(
-      patientData.birthDate,
-      measurementDate,
-      patientData.gestationalAgeAtBirth
-    )
-    if (!correctedAge) return false
-    return correctedAge.correctedAgeYears < (2 / 52.1775) || correctedAge.gestationalAge < 42
-  }, [patientData])
-
-  const getPreemieData = useCallback((type, measurementDate) => {
-    if (!patientData?.birthDate || !patientData?.gestationalAgeAtBirth) return null
-    const correctedAge = calculateCorrectedAge(
-      patientData.birthDate,
-      measurementDate,
-      patientData.gestationalAgeAtBirth
-    )
-    if (!correctedAge || correctedAge.gestationalAge < 22 || correctedAge.gestationalAge > 50) return null
-    
-    const ga = Math.round(correctedAge.gestationalAge)
-    
-    if (type === 'weight') {
-      if (intergrowthWeightData && intergrowthWeightData.length > 0) {
-        const closest = intergrowthWeightData.reduce((closest, item) => {
-          if (!closest) return item
-          return Math.abs(item.week - ga) < Math.abs(closest.week - ga) ? item : closest
-        }, null)
-        if (closest) return { ...closest, xAxisValue: ga, isPreemie: true }
-      }
-      if (fentonData?.weight) {
-        const entry = fentonData.weight.find(w => w.week === ga)
-        if (entry) {
-          return {
-            week: entry.week,
-            weightP3: entry.p3,
-            weightP50: entry.p50,
-            weightP97: entry.p97,
-            weightL: entry.L,
-            weightM: entry.M,
-            weightS: entry.S,
-            xAxisValue: ga,
-            isPreemie: true
-          }
-        }
-      }
-    } else if (type === 'height') {
-      if (intergrowthLengthData && intergrowthLengthData.length > 0) {
-        const closest = intergrowthLengthData.reduce((closest, item) => {
-          if (!closest) return item
-          return Math.abs(item.week - ga) < Math.abs(closest.week - ga) ? item : closest
-        }, null)
-        if (closest) return { ...closest, xAxisValue: ga, isPreemie: true }
-      }
-      if (fentonData?.length) {
-        const entry = fentonData.length.find(w => w.week === ga)
-        if (entry) {
-          return {
-            week: entry.week,
-            heightP3: entry.p3,
-            heightP50: entry.p50,
-            heightP97: entry.p97,
-            heightL: entry.L,
-            heightM: entry.M,
-            heightS: entry.S,
-            xAxisValue: ga,
-            isPreemie: true
-          }
-        }
-      }
-    } else if (type === 'hc') {
-      if (intergrowthHCData && intergrowthHCData.length > 0) {
-        const closest = intergrowthHCData.reduce((closest, item) => {
-          if (!closest) return item
-          return Math.abs(item.week - ga) < Math.abs(closest.week - ga) ? item : closest
-        }, null)
-        if (closest) return { ...closest, xAxisValue: ga, isPreemie: true }
-      }
-      if (fentonData?.headCircumference) {
-        const entry = fentonData.headCircumference.find(w => w.week === ga)
-        if (entry) {
-          return {
-            week: entry.week,
-            hcP3: entry.p3,
-            hcP50: entry.p50,
-            hcP97: entry.p97,
-            hcL: entry.L,
-            hcM: entry.M,
-            hcS: entry.S,
-            xAxisValue: ga,
-            isPreemie: true
-          }
-        }
-      }
-    }
-    return null
-  }, [patientData, fentonData, intergrowthWeightData, intergrowthLengthData, intergrowthHCData])
 
   const prepareChartData = useCallback((data, measurements, valueKey, getValue) => {
     if (!data) return []
@@ -1180,7 +1002,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
     return chartData
   }, [patientData?.birthDate, patientData?.gestationalAgeAtBirth])
 
-  // Prepare hybrid chart data that combines preemie (Fenton/INTERGROWTH) and term (WHO/CDC) data
+  // Prepare hybrid chart data that combines preemie (Fenton) and term (WHO/CDC) data
   const prepareHybridChartData = useCallback((type, standardData, preemieData, measurements, valueKey, getValue) => {
     if (!patientData?.birthDate || !patientData?.gestationalAgeAtBirth) {
       // No preemie info, use standard data
@@ -2381,19 +2203,6 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
   const formatSkinfoldTick = useCallback((value) => formatYAxisTick(value, 1), [formatYAxisTick])
 
   const getPreemieWeightData = useMemo(() => {
-    if (!fentonData?.weight && !intergrowthWeightData) return null
-    // Prefer INTERGROWTH, fall back to Fenton
-    if (intergrowthWeightData && intergrowthWeightData.length > 0) {
-      return intergrowthWeightData.map(r => ({
-        week: r.week,
-        weightP3: r.weightP3,
-        weightP50: r.weightP50,
-        weightP97: r.weightP97,
-        weightL: r.weightL,
-        weightM: r.weightM,
-        weightS: r.weightS
-      }))
-    }
     if (fentonData?.weight) {
       return fentonData.weight.map(r => ({
         week: r.week,
@@ -2406,21 +2215,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       }))
     }
     return null
-  }, [fentonData, intergrowthWeightData])
+  }, [fentonData])
 
   const getPreemieHeightData = useMemo(() => {
-    if (!fentonData?.length && !intergrowthLengthData) return null
-    if (intergrowthLengthData && intergrowthLengthData.length > 0) {
-      return intergrowthLengthData.map(r => ({
-        week: r.week,
-        heightP3: r.heightP3,
-        heightP50: r.heightP50,
-        heightP97: r.heightP97,
-        heightL: r.heightL,
-        heightM: r.heightM,
-        heightS: r.heightS
-      }))
-    }
     if (fentonData?.length) {
       return fentonData.length.map(r => ({
         week: r.week,
@@ -2433,21 +2230,9 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       }))
     }
     return null
-  }, [fentonData, intergrowthLengthData])
+  }, [fentonData])
 
   const getPreemieHCData = useMemo(() => {
-    if (!fentonData?.headCircumference && !intergrowthHCData) return null
-    if (intergrowthHCData && intergrowthHCData.length > 0) {
-      return intergrowthHCData.map(r => ({
-        week: r.week,
-        hcP3: r.hcP3,
-        hcP50: r.hcP50,
-        hcP97: r.hcP97,
-        hcL: r.hcL,
-        hcM: r.hcM,
-        hcS: r.hcS
-      }))
-    }
     if (fentonData?.headCircumference) {
       return fentonData.headCircumference.map(r => ({
         week: r.week,
@@ -2460,7 +2245,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       }))
     }
     return null
-  }, [fentonData, intergrowthHCData])
+  }, [fentonData])
 
   const wfaChartDataRaw = useMemo(() => {
     const preemieData = getPreemieWeightData
@@ -3172,7 +2957,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
         {/* 1. Weight-for-Age */}
       {wfaChartData && wfaChartData.length > 0 && (
         <div className="chart-container">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <div className="chart-header">
             <h3 style={{ margin: 0 }}>Weight-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
             <ZoomControls chartType="wfa" isPreemie={isPretermBirth(patientData?.gestationalAgeAtBirth)} />
           </div>
@@ -3252,7 +3037,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       {/* 2. Height-for-Age */}
       {hfaChartData && hfaChartData.length > 0 && (
         <div className="chart-container">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <div className="chart-header">
             <h3 style={{ margin: 0 }}>Height-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
             <ZoomControls chartType="hfa" isPreemie={isPretermBirth(patientData?.gestationalAgeAtBirth)} />
           </div>
@@ -3325,7 +3110,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       {/* 4. Head Circumference-for-Age */}
       {hcfaChartData && hcfaChartData.length > 0 && (hcfaData?.[0]?.hcP50 != null) && (
         <div className="chart-container">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <div className="chart-header">
             <h3 style={{ margin: 0 }}>Head Circumference-for-Age <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
             <ZoomControls chartType="hcfa" isPreemie={isPretermBirth(patientData?.gestationalAgeAtBirth)} />
           </div>
@@ -3398,7 +3183,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
       {/* 5. BMI-for-Age (WHO only) */}
       {referenceSources?.age === 'who' && bmifaChartData && bmifaChartData.length > 0 && (
         <div className="chart-container">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <div className="chart-header">
             <h3 style={{ margin: 0 }}>BMI-for-Age <span className="chart-source">(WHO)</span></h3>
             <ZoomControls chartType="bmi" isPreemie={false} />
           </div>
@@ -3457,7 +3242,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
           {/* Arm Circumference-for-Age */}
           {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.armCircumference) && acfaData && acfaData.length > 0 && (
             <div className="chart-container">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <div className="chart-header">
                 <h3 style={{ margin: 0 }}>Mid-Upper Arm Circumference-for-Age <span className="chart-source">(WHO)</span></h3>
                 <ZoomControls chartType="acfa" isPreemie={false} />
               </div>
@@ -3505,7 +3290,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
           {/* Subscapular Skinfold-for-Age */}
           {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.subscapularSkinfold) && ssfaData && ssfaData.length > 0 && (
             <div className="chart-container">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <div className="chart-header">
                 <h3 style={{ margin: 0 }}>Subscapular Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
                 <ZoomControls chartType="ssfa" isPreemie={false} />
               </div>
@@ -3553,7 +3338,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
           {/* Triceps Skinfold-for-Age */}
           {patientData?.measurements && Array.isArray(patientData?.measurements) && patientData?.measurements.some(m => m && m.tricepsSkinfold) && tsfaData && tsfaData.length > 0 && (
             <div className="chart-container">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <div className="chart-header">
                 <h3 style={{ margin: 0 }}>Triceps Skinfold-for-Age <span className="chart-source">(WHO)</span></h3>
                 <ZoomControls chartType="tsfa" isPreemie={false} />
               </div>
@@ -3606,7 +3391,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
           <h3 className="section-header">Weight-for-Height</h3>
           
           <div className="chart-container">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <div className="chart-header">
               <h3 style={{ margin: 0 }}>Weight-for-Height <span className="chart-source">({getSourceLabel(referenceSources?.age)})</span></h3>
               <ZoomControls chartType="wh" isPreemie={false} />
             </div>
