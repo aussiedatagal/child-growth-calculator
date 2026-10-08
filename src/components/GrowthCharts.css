@@ -317,3 +317,11 @@
 .chart-header > :last-child {
   flex-shrink: 0;
 }
+
+/* Tapping a chart focuses part of it and Chrome draws a focus ring around
+   the plot. Hide that for taps and clicks; keyboard focus still shows it. */
+.recharts-wrapper:focus:not(:focus-visible),
+.recharts-surface:focus:not(:focus-visible),
+.recharts-surface g:focus:not(:focus-visible) {
+  outline: none;
+}

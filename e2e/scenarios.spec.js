@@ -331,6 +331,12 @@ test('the tooltip stays inside the visible part of a scrolled chart', async ({ p
   if (isPhone(testInfo)) await page.mouse.click(dot.x + dot.width / 2, dot.y + dot.height / 2)
   const tooltip = chart.locator('.recharts-tooltip-wrapper').first()
   await expect(tooltip).toContainText('kg')
+  // No focus ring drawn around the plot after a tap or click
+  const outline = await page.evaluate(() => {
+    const a = document.activeElement
+    return a && a.closest('.recharts-wrapper') ? getComputedStyle(a).outlineStyle : 'none'
+  })
+  expect(outline).toBe('none')
   const box = await wrapper.boundingBox()
   // The tooltip slides into place, so wait for it to settle
   await expect.poll(async () => {
