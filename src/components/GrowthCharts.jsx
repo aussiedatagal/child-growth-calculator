@@ -2799,7 +2799,7 @@ function GrowthCharts({ patientData, referenceSources, onReferenceSourcesChange,
     const isNarrow = typeof window !== 'undefined' && window.innerWidth < 768
     if (!isNarrow) return { x: 'auto', y: 'auto' }
     const scrollLeft = chartScrollState[chartType]?.scrollLeft || 0
-    return { x: scrollLeft + getChartMargins().left + STICKY_Y_AXIS_WIDTH + 4, y: 0 }
+    return { x: scrollLeft + getChartMargins().left + STICKY_Y_AXIS_WIDTH + 16, y: 0 }
   }
 
   // Once a wide chart is scrolled sideways its y-axis scrolls out of view, so
