@@ -386,3 +386,33 @@ test.describe('projected growth', () => {
   })
 })
 
+test.describe('page health', () => {
+  for (const ga of [40, 28]) {
+    test(`no failed requests or errors (born at ${ga} weeks)`, async ({ page }) => {
+      const failed = []
+      page.on('response', r => {
+        if (r.status() >= 400) failed.push(`${r.status()} ${r.url()}`)
+        // The dev server answers missing files with the app page instead of a 404
+        if (r.url().includes('/data/') && (r.headers()['content-type'] || '').includes('text/html')) failed.push(`missing ${r.url()}`)
+      })
+      const errors = watchErrors(page)
+      await seed(page, [infant(ga)])
+      await page.waitForLoadState('networkidle')
+      expect(failed).toEqual([])
+      expect(errors).toEqual([])
+    })
+  }
+
+  test('zoom buttons stay on the same line as each chart title', async ({ page }, testInfo) => {
+    await seed(page, [infant(40)])
+    const headers = await page.locator('.chart-header').all()
+    expect(headers.length).toBeGreaterThan(3)
+    for (const header of headers) {
+      const title = await header.locator('h3').boundingBox()
+      const buttons = await header.locator('button').first().boundingBox()
+      expect(buttons.y).toBeLessThan(title.y + title.height)
+    }
+    await shot(page, testInfo, 'chart-headers')
+  })
+})
+

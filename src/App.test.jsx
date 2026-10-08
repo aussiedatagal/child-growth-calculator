@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
@@ -14,7 +14,15 @@ import {
   createMockExportData
 } from './test/utils'
 
+const realFileReader = window.FileReader
+
 describe('Growth Charts Application - Comprehensive Tests', () => {
+  // Import tests swap in a fake FileReader; put the real one back after each
+  // test rather than on a timer, which could fire during the next test
+  afterEach(() => {
+    window.FileReader = realFileReader
+  })
+
   beforeEach(() => {
     // Clear all state
     clearLocalStorage()
@@ -891,7 +899,6 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
       const fileInput = document.querySelector('input[type="file"]')
       
       // Mock FileReader to return our data
-      const originalFileReader = window.FileReader
       let fileReaderInstance = null
       window.FileReader = class MockFileReader {
         constructor() {
@@ -922,11 +929,6 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
       const event = new Event('change', { bubbles: true })
       fileInput.dispatchEvent(event)
 
-      // Restore FileReader after a moment
-      setTimeout(() => {
-        window.FileReader = originalFileReader
-      }, 100)
-
       await waitFor(() => {
         const storageData = getLocalStorageData()
         expect(Object.keys(storageData.people).length).toBe(2)
@@ -955,7 +957,6 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
       })
 
       // Mock FileReader
-      const originalFileReader = window.FileReader
       window.FileReader = class MockFileReader {
         constructor() {
           this.result = null
@@ -993,10 +994,6 @@ describe('Growth Charts Application - Comprehensive Tests', () => {
         const storageData = getLocalStorageData()
         expect(Object.keys(storageData.people).length).toBe(2)
       }, { timeout: 5000 })
-
-      setTimeout(() => {
-        window.FileReader = originalFileReader
-      }, 200)
     })
   })
 
