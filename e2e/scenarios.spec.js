@@ -200,7 +200,7 @@ test.describe('entering measurements', () => {
   })
 
   test('the premature box shows a note for 37 weeks or more', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     await page.selectOption('#personSelect', '__add__')
     await page.check('#newPersonIsPremature')
     await page.fill('#newPersonGA', '36.5')
@@ -262,12 +262,12 @@ test.describe('saving data', () => {
   })
 
   test('the file picker accepts any file type (iOS greys out .json otherwise)', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     await expect(page.locator('input[type=file]')).not.toHaveAttribute('accept', /.+/)
   })
 
   test('a file that is not an export gives a clear message', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     const message = new Promise(resolve => page.once('dialog', d => { resolve(d.message()); d.dismiss() }))
     await page.locator('input[type=file]').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') })
     expect(await message).toMatch(/Download Data/)
@@ -275,7 +275,7 @@ test.describe('saving data', () => {
 })
 
 test('the footer links to GitHub issues for bug reports', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('./')
   const link = page.getByRole('link', { name: 'Report a bug' })
   await expect(link).toHaveAttribute('href', 'https://github.com/aussiedatagal/child-growth-calculator/issues')
 })

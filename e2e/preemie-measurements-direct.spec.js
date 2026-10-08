@@ -48,7 +48,7 @@ test.describe('Preemie Measurements Before Due Date - Direct Data', () => {
     }, patientData);
 
     // Navigate to the app
-    await page.goto('/');
+    await page.goto('./');
     
     // Wait for the app to load
     await page.waitForLoadState('networkidle');

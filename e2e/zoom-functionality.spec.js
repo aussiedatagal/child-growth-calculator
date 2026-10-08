@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Zoom Functionality', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1000);
     

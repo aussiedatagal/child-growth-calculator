@@ -30,7 +30,7 @@ export const measurement = (birthDate, date, values) => ({
 // Load the app with people already saved, as if from an earlier visit
 export const seed = async (page, people, extra = {}) => {
   // Write storage from a static page first, so the app loads once with it
-  await page.goto('/robots.txt')
+  await page.goto('./robots.txt')
   await page.evaluate(({ people, extra }) => {
     localStorage.clear()
     const byId = Object.fromEntries(people.map(p => [p.id, p]))
@@ -38,7 +38,7 @@ export const seed = async (page, people, extra = {}) => {
     localStorage.setItem('growthChartSelectedPerson', people[0]?.id || '')
     Object.entries(extra).forEach(([k, v]) => localStorage.setItem(k, v))
   }, { people, extra })
-  await page.goto('/')
+  await page.goto('./')
   await page.waitForLoadState('networkidle')
   if (people.some(p => p.measurements.length > 0)) {
     await expect(page.locator('.recharts-surface').first()).toBeVisible({ timeout: 15000 })

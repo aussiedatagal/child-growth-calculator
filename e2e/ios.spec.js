@@ -81,7 +81,7 @@ test('a file saved from Safari imports into the home screen app', async ({ brows
   const app = await browser.newContext(testInfo.project.use)
   const appPage = await app.newPage()
   await asHomeScreenApp(appPage)
-  await appPage.goto('/')
+  await appPage.goto('./')
   await expect(appPage.getByText(/Select Person/i).first()).toBeVisible()
   expect(await peopleInStorage(appPage)).toHaveLength(0)
 
@@ -112,7 +112,7 @@ test('the home screen app moves data back to Safari through the share sheet', as
 
   const safari = await browser.newContext(testInfo.project.use)
   const safariPage = await safari.newPage()
-  await safariPage.goto('/')
+  await safariPage.goto('./')
   await safariPage.locator('input[type=file]').setInputFiles({ name: shared.name, mimeType: 'application/json', buffer: Buffer.from(shared.text) })
   await expect.poll(async () => (await peopleInStorage(safariPage)).length).toBe(1)
   await safari.close()

@@ -5,7 +5,7 @@ test.describe('Preemie Measurements Before Due Date', () => {
   // The direct data test (preemie-measurements-direct.spec.js) is more reliable
   test.skip('should display measurements at correct gestational ages, not 42 weeks', async ({ page }) => {
     // Navigate to the app
-    await page.goto('/');
+    await page.goto('./');
     
     // Wait for the app to load
     await page.waitForLoadState('networkidle');
